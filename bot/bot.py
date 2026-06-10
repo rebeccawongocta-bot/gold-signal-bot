@@ -1,6 +1,5 @@
-# bot/bot.py — Octa Trade TG Bot (Render 24/7 部署版)
-# 框架：AIPRIME 云端部署框架
-# 功能：XAUUSD/BTC 信号推送 + 市场开盘提醒 + 保活机制
+# bot/bot.py — Octopus Smart TG Bot (Render 24/7 部署版)
+# 功能：智能信号推送（工作日每小时 / 周末每两小时）+ 市场开盘提醒 + 保活机制
 
 import os
 import sys
@@ -11,29 +10,36 @@ import requests
 from datetime import datetime, timezone, timedelta
 import pytz
 
+from flask import Flask, request
+
 # ─── 配置区 ────────────────────────────────────────────────────────────────
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8702664592:AAE7QP3z9Tc9lHegOhOnXuWWpGDWGZKlY7I")
-SIGNAL_CID = os.environ.get("SIGNAL_CID", "-1003800874000")   # @octatradehongkong
-GROUP_CID  = os.environ.get("GROUP_CID",  "")                  # 预留行情问答群
+SIGNAL_CID = os.environ.get("SIGNAL_CID", "-1003899183014")   # @OctopusAITrader 新频道
 
 OCTOPUS_API = "https://app.octopus-vision.com/prod-api/appHuginn/app-api/ai/quote-predict/latest"
 OCTOPUS_HEADERS = {"Client-Type": "ANDROID", "Platform": "OCTOPUS"}
 
 RENDER_URL = os.environ.get("RENDER_URL", "https://octatrade-tg-bot.onrender.com")
 
-# 推送时段（CST 整点，±5分钟窗口）
-SIGNAL_HOURS_CST = {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 21, 22}
 TZ = pytz.timezone("Asia/Shanghai")  # CST (UTC+8)
 
-# 市场开盘提醒（UTC 时间，开盘前5分钟）
+# 市场开盘提醒（UTC 时间，整点前10分钟 = 当地开盘时间前10分钟）
 MARKET_REMINDERS = [
-    (0,  5, "悉尼 Forex",  "Australia/Sydney"),
-    (2,  5, "东京 Forex",   "Asia/Tokyo"),
-    (7,  5, "伦敦 Forex",   "Europe/London"),
-    (8,  5, "法兰克福 Forex","Europe/Berlin"),
-    (13, 5, "纽约 Forex",   "US/Eastern"),
-    (14, 5, "芝加哥 Forex", "US/Central"),
+    (19, 50, "Wellington Forex", "Pacific/Auckland"),
+    (21, 50, "Sydney Forex",     "Australia/Sydney"),
+    (23, 50, "Tokyo Forex",      "Asia/Tokyo"),
+    ( 0, 50, "Hong Kong Forex",  "Asia/Hong_Kong"),
+    ( 0, 50, "Singapore Forex",  "Asia/Singapore"),
+    ( 5, 50, "Dubai Gulf Forex", "Asia/Dubai"),
+    ( 6, 50, "Moscow MOEX",      "Europe/Moscow"),
+    ( 6, 50, "London Forex",     "Europe/London"),
+    ( 6, 50, "Frankfurt Forex",  "Europe/Berlin"),
+    ( 6, 50, "Paris Forex",      "Europe/Paris"),
+    (11, 50, "New York Forex",   "US/Eastern"),
+    (13, 50, "Chicago Forex",    "US/Central"),
+    (14, 50, "Denver Forex",     "US/Mountain"),
+    (15, 50, "Los Angeles Forex","US/Pacific"),
 ]
 
 KEEP_ALIVE_INTERVAL = 600   # 10 分钟
@@ -64,166 +70,196 @@ def fetch_octopus(symbol="XAUUSD"):
     return None
 
 def build_signal_message(symbol="XAUUSD"):
-    """构造推送消息（原有格式）"""
+    """构造推送消息（最终格式）"""
     data = fetch_octopus(symbol)
     if not data:
-        # 备用：BTC 数据
+        # XAUUSD 无返回时，尝试 BTCUSDT
         if symbol == "XAUUSD":
+            print(f"[build_signal] {symbol} 无数据，尝试 BTCUSDT")
             return build_signal_message("BTCUSDT")
         return None
 
     try:
-        direction   = data.get("direction", "NEUTRAL")
-        probability = data.get("probability", 0)
-        resistance  = data.get("resistance", "N/A")
-        support     = data.get("support", "N/A")
-        suggestion  = data.get("suggestion", {})
-        if isinstance(suggestion, str):
-            # 尝试解析 JSON 字符串
-            try:
-                suggestion = json.loads(suggestion)
-            except:
-                suggestion = {}
+        direction = data.get("direction", "NEUTRAL").upper()
+        prob      = int(data.get("directionProbability", 0))
+        support_p = data.get("supportPrice", "N/A")
+        resist_p  = data.get("resistancePrice", "N/A")
+        target_p  = data.get("targetPrice", "N/A")
+        change_r  = data.get("changeRate", "")
+        period    = data.get("updatePeriod", "1H")
 
-        entry = suggestion.get("entry", "N/A")
-        tp    = suggestion.get("takeProfit", suggestion.get("tp", "N/A"))
-        sl    = suggestion.get("stopLoss",   suggestion.get("sl", "N/A"))
+        # 解析品种名称
+        name_raw = data.get("name", "{}")
+        try:
+            name_obj = json.loads(name_raw)
+            sym_name = name_obj.get("en", symbol)
+        except:
+            sym_name = symbol
 
-        now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
+        # 解析 AI 分析（完整版，英文）
+        suggestion_raw = data.get("suggestion", "{}")
+        try:
+            sug = json.loads(suggestion_raw) if isinstance(suggestion_raw, str) else suggestion_raw
+            ai_text = sug.get("en", str(suggestion_raw))
+        except:
+            ai_text = str(suggestion_raw)
 
-        emoji = "🟢" if direction.upper() == "LONG" else "🔴" if direction.upper() == "SHORT" else "⚪"
-        dir_text = "做多 LONG" if direction.upper() == "LONG" else "做空 SHORT" if direction.upper() == "SHORT" else "观望"
+        if direction == "UP":
+            emoji = "🔵"
+            arrow = "⬆️"
+            dir_text = "BUY"
+        elif direction == "DOWN":
+            emoji = "🔴"
+            arrow = "⬇️"
+            dir_text = "SELL"
+        else:
+            emoji = "⚪"
+            arrow = "➖"
+            dir_text = "HOLD"
 
         lines = [
-            f"{emoji} **AI Signal — {symbol}**",
-            f"🕐 {now_str} (CST)",
+            f"{emoji} {symbol} · {sym_name}",
+            f"{arrow} {dir_text}  {prob}%  |  {period}  |  {change_r}",
             "",
-            f"**方向**: {dir_text}",
-            f"**概率**: {probability}%",
+            f"🎯 Target:  {target_p}",
+            f"🛡 Support:  {support_p}",
+            f"🚧 Resistance: {resist_p}",
             "",
-            f"**阻力位**: {resistance}",
-            f"**支撑位**: {support}",
+            f"📊 AI: {ai_text}",
             "",
-            "**AI Suggestion**",
-            f"  入场价: {entry}",
-            f"  止盈: {tp}",
-            f"  止损: {sl}",
-            "",
-            "---",
-            "📡 Octopus Smart AI · 章鱼智投",
-            "@rebeccawongocta",
+            "⚠️ Investing involves risk.",
+            "🤝 BD: @rebecca_octopus",
         ]
         return "\n".join(lines)
     except Exception as e:
         print(f"[build_signal] 构造消息失败: {e}")
         return None
 
+
 def send_signal_to_channel(symbol="XAUUSD"):
-    """推送信号到频道"""
+    """推送信号到频道（使用最终格式）"""
     msg = build_signal_message(symbol)
     if not msg:
-        print(f"[{datetime.now(TZ).strftime('%H:%M')}] ⚠️ 无法获取 {symbol} 数据，跳过推送")
+        print(f"[{datetime.now(TZ).strftime('%H:%M')}] ⚠️ 无法获取任何信号数据，跳过推送")
         return False
 
     payload = {
         "chat_id": SIGNAL_CID,
         "text": msg,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
     result = tg_api("sendMessage", payload)
     now_str = datetime.now(TZ).strftime("%m-%d %H:%M")
     if result and result.get("ok"):
-        print(f"[{now_str}] ✅ 信号推送成功: {symbol}")
+        print(f"[{now_str}] ✅ 信号推送成功")
         return True
     else:
         print(f"[{now_str}] ❌ 信号推送失败: {result}")
         return False
 
+
 # ─── 线程 1：信号调度器 ────────────────────────────────────────────────────
 
 def start_signal_scheduler():
-    """后台线程 — 在 SIGNAL_HOURS_CST 的 :05 分推送信号"""
+    """后台线程 — 智能推送调度
+    周一至周五：每小时推送一次（XAUUSD 优先，无返回时推 BTCUSDT）
+    周六至周日：每两小时推送一次（推 BTCUSDT）
+    """
+    def should_push_now():
+        """判断是否应该推送（根据星期几）"""
+        now = datetime.now(TZ)
+        weekday = now.weekday()  # 0=周一, 6=周日
+        
+        if weekday <= 4:  # 周一至周五：每小时推送
+            return True
+        else:  # 周六、周日：每两小时推送（仅在偶数小时）
+            return now.hour % 2 == 0
+
+    def get_symbol_for_time():
+        """根据时间决定推送品种"""
+        now = datetime.now(TZ)
+        weekday = now.weekday()
+        
+        if weekday <= 4:  # 周一至周五：优先 XAUUSD
+            return "XAUUSD"
+        else:  # 周六、周日：推 BTCUSDT（XAUUSD 休市）
+            return "BTCUSDT"
+
     def loop():
         # 启动时补发逻辑
         now = datetime.now(TZ)
-        if now.weekday() < 5 and now.hour in SIGNAL_HOURS_CST and now.minute > 5:
-            print(f"⏰ 启动时补发（CST {now.hour}:00 已过 :05）")
+        print(f"⏰ 信号调度器启动（{now.strftime('%Y-%m-%d %H:%M')} CST）")
+        if should_push_now():
             try:
-                send_signal_to_channel()
+                symbol = get_symbol_for_time()
+                print(f"⏰ 启动时补发: {symbol}")
+                send_signal_to_channel(symbol)
             except Exception as e:
                 print(f"⏰ 补发失败: {e}")
 
         while True:
             now = datetime.now(TZ)
-            # 计算下一个推送目标时间
-            target_today = now.replace(minute=5, second=0, microsecond=0)
-            if now.minute >= 5:
-                # 找下一个整点
-                next_hour = (now.hour + 1) % 24
-                target = now.replace(hour=next_hour, minute=5, second=0, microsecond=0)
-                if next_hour == 0 and now.hour != 23:
-                    target = target + timedelta(days=1)
-            else:
-                target = target_today
+            
+            # 判断下次推送时间
+            if now.weekday() <= 4:  # 周一至周五：每小时
+                target = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+                sleep_secs = (target - now).total_seconds()
+                print(f"⏰ 下次推送: {target.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）— 工作日模式")
+            else:  # 周六、周日：每两小时
+                next_even_hour = now.replace(minute=0, second=0, microsecond=0)
+                if next_even_hour.hour % 2 != 0:
+                    next_even_hour += timedelta(hours=1)
+                if next_even_hour <= now:
+                    next_even_hour += timedelta(hours=2)
+                sleep_secs = (next_even_hour - now).total_seconds()
+                print(f"⏰ 下次推送: {next_even_hour.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）— 周末模式")
 
-            # 如果目标时间不在 SIGNAL_HOURS_CST 里，往前找到最近的一个
-            while target.hour not in SIGNAL_HOURS_CST:
-                target = target.replace(hour=(target.hour - 1) % 24)
-                if target.hour == now.hour:  # 绕了一圈，找明天
-                    target = (target + timedelta(days=1)).replace(hour=list(SIGNAL_HOURS_CST)[0], minute=5)
-                    break
+            time.sleep(sleep_secs)
 
-            sleep_secs = (target - now).total_seconds()
-            if sleep_secs > 0:
-                print(f"⏰ 下次推送: {target.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）")
-                time.sleep(sleep_secs)
-
-            # 到达推送时间，检查窗口
-            now2 = datetime.now(TZ)
-            if now2.weekday() < 5 and now2.hour in SIGNAL_HOURS_CST:
+            # 到达推送时间
+            if should_push_now():
+                symbol = get_symbol_for_time()
                 try:
-                    send_signal_to_channel()
+                    send_signal_to_channel(symbol)
                 except Exception as e:
                     print(f"⏰ 定时信号推送异常: {e}")
-            else:
-                print(f"⏰ {now2.strftime('%a %H:%M')} 非工作日/非推送时段，跳过")
 
             time.sleep(60)  # 防止同一时段重复推送
 
     t = threading.Thread(target=loop, daemon=True, name="SignalScheduler")
     t.start()
-    print("⏰ 信号调度器线程已启动")
+    print("⏰ 信号调度器线程已启动（工作日每小时 / 周末每两小时）")
+
 
 # ─── 线程 2：市场开盘提醒 ─────────────────────────────────────────────────
 
 def start_market_reminder():
-    """后台线程 — 主要市场开盘前 5 分钟提醒"""
+    """后台线程 — 全球主要市场开盘前 10 分钟提醒（英文）"""
     def loop():
-        last_sent = set()  # 当天已发送的提醒，格式: "YYYY-MM-DD_HH"
+        last_sent = set()
         while True:
             now_utc = datetime.now(pytz.UTC)
             now_cst = now_utc.astimezone(TZ)
 
-            # 每天重置 last_sent
             today_key = now_cst.strftime("%Y-%m-%d")
             if not any(k.startswith(today_key) for k in last_sent):
                 last_sent.clear()
 
             for utc_h, utc_m, name, tz_str in MARKET_REMINDERS:
-                send_key = f"{today_key}_{utc_h:02d}"
+                send_key = f"{today_key}_{utc_h:02d}_{utc_m:02d}"
                 if send_key in last_sent:
                     continue
-                # 检查是否到达提醒时间（UTC）
                 if now_utc.hour == utc_h and now_utc.minute >= utc_m and now_utc.minute < utc_m + WINDOW_MINUTES:
                     market_tz = pytz.timezone(tz_str)
                     market_time = now_utc.astimezone(market_tz).strftime("%H:%M")
                     msg = (
-                        f"🔔 **市场开盘提醒**\n\n"
-                        f"**{name}** 市场将在 **{market_time}** 开盘！\n"
-                        f"做好准备，关注行情波动。\n\n"
+                        f"🔔 <b>Market Opening Reminder</b>\n\n"
+                        f"<b>{name}</b> market opens at <b>{market_time}</b>!\n"
+                        f"Get ready and watch for volatility.\n\n"
                         f"📡 Octopus Smart AI"
                     )
-                    payload = {"chat_id": SIGNAL_CID, "text": msg, "parse_mode": "Markdown"}
+                    payload = {"chat_id": SIGNAL_CID, "text": msg, "parse_mode": "HTML"}
                     result = tg_api("sendMessage", payload)
                     if result and result.get("ok"):
                         print(f"🔔 市场提醒已发送: {name}")
@@ -235,7 +271,8 @@ def start_market_reminder():
 
     t = threading.Thread(target=loop, daemon=True, name="MarketReminder")
     t.start()
-    print("🔔 市场提醒线程已启动")
+    print("🔔 市场提醒线程已启动（整点前10分钟，英文）")
+
 
 # ─── 线程 3：保活机制 ─────────────────────────────────────────────────────
 
@@ -254,9 +291,8 @@ def start_keep_alive():
     t.start()
     print("💓 保活线程已启动")
 
-# ─── 线程 4：Flask Web 服务（接收 Telegram Webhook）───────────────────────
 
-from flask import Flask, request
+# ─── 线程 4：Flask Web 服务（接收 Telegram Webhook）───────────────────────
 
 app = Flask(__name__)
 
@@ -276,8 +312,7 @@ def telegram_webhook():
     chat_id = message.get("chat", {}).get("id")
 
     if text and chat_id:
-        # 简单 echo，未来可接入 AI 问答
-        tg_api("sendMessage", {"chat_id": chat_id, "text": f"收到：{text}\n（AI 问答功能开发中）"})
+        tg_api("sendMessage", {"chat_id": chat_id, "text": f"Received: {text}\n(AI Q&A coming soon)"})
         print(f"[Webhook] 收到消息 from {chat_id}: {text[:50]}")
 
     return {"ok": True}
@@ -287,21 +322,34 @@ def start_web_server():
     print(f"🌐 Web 服务启动，端口 {port}")
     app.run(host="0.0.0.0", port=port)
 
+
 # ─── 主程序 ────────────────────────────────────────────────────────────────
+# CHANNEL_DISABLED = True  → 停止所有频道推送，只保留 Web 服务空转
+CHANNEL_DISABLED = False
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Octa Trade TG Bot — Render 24/7 部署版")
+    print("  Octopus Smart TG Bot — Render 24/7 部署版")
     print(f"  启动时间: {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')} CST")
-    print(f"  目标频道: {SIGNAL_CID}")
+    if CHANNEL_DISABLED:
+        print("  ⚠️  频道推送已停用（CHANNEL_DISABLED = True）")
+        print(f"  原目标频道: {SIGNAL_CID}")
+    else:
+        print(f"  目标频道: {SIGNAL_CID}")
     print("=" * 60)
 
-    # 启动 4 个线程
-    start_keep_alive()      # 💓 保活（先启动，确保服务不会被休眠）
+    # 保活线程始终启动（防止 Render 休眠）
+    start_keep_alive()
     time.sleep(1)
-    start_signal_scheduler() # ⏰ 信号调度
-    time.sleep(1)
-    start_market_reminder()  # 🔔 市场提醒
+
+    if not CHANNEL_DISABLED:
+        start_signal_scheduler()
+        time.sleep(1)
+        start_market_reminder()
+    else:
+        print("⏸  信号推送已暂停")
+        print("⏸  市场提醒已暂停")
+        print("💓 仅保活 + Web 服务运行中...")
 
     # 主线程运行 Web 服务（Render 要求端口监听）
     start_web_server()
