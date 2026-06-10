@@ -188,10 +188,13 @@ def start_signal_scheduler():
             return "BTCUSDT"
 
     def loop():
-        # 启动时补发逻辑
+        """主循环 — 在 :05 分推送"""
+        # 启动时补发逻辑（如果当前已过 :05，立即补发）
         now = datetime.now(TZ)
         print(f"⏰ 信号调度器启动（{now.strftime('%Y-%m-%d %H:%M')} CST）")
-        if should_push_now():
+        
+        current_minute = now.minute
+        if current_minute >= 5 and should_push_now():
             try:
                 symbol = get_symbol_for_time()
                 print(f"⏰ 启动时补发: {symbol}")
@@ -202,19 +205,34 @@ def start_signal_scheduler():
         while True:
             now = datetime.now(TZ)
             
-            # 判断下次推送时间
-            if now.weekday() <= 4:  # 周一至周五：每小时
-                target = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            # 计算下一个 :05 分时间点
+            if now.weekday() <= 4:  # 周一至周五：每小时 :05
+                target = now.replace(minute=5, second=0, microsecond=0)
+                if now.minute >= 5:  # 已过当前小时的 :05，跳到下一小时
+                    target += timedelta(hours=1)
                 sleep_secs = (target - now).total_seconds()
                 print(f"⏰ 下次推送: {target.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）— 工作日模式")
-            else:  # 周六、周日：每两小时
-                next_even_hour = now.replace(minute=0, second=0, microsecond=0)
-                if next_even_hour.hour % 2 != 0:
-                    next_even_hour += timedelta(hours=1)
-                if next_even_hour <= now:
-                    next_even_hour += timedelta(hours=2)
-                sleep_secs = (next_even_hour - now).total_seconds()
-                print(f"⏰ 下次推送: {next_even_hour.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）— 周末模式")
+                
+            else:  # 周六、周日：每两小时 :05（仅在偶数小时）
+                # 找到下一个偶数小时的 :05
+                next_even = now.replace(minute=5, second=0, microsecond=0)
+                if next_even.hour % 2 != 0 or now.minute > 5:
+                    # 当前是奇数小时，或者已过 :05，跳到下一个偶数小时
+                    if next_even.hour % 2 != 0:
+                        next_even += timedelta(hours=1)
+                    else:
+                        next_even += timedelta(hours=2)
+                
+                # 确保是偶数小时
+                while next_even.hour % 2 != 0:
+                    next_even += timedelta(hours=1)
+                
+                if next_even <= now:
+                    next_even += timedelta(hours=2)
+                
+                sleep_secs = (next_even - now).total_seconds()
+                print(f"⏰ 下次推送: {next_even.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）— 周末模式")
+                target = next_even
 
             time.sleep(sleep_secs)
 
