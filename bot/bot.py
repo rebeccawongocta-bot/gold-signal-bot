@@ -1,4 +1,5 @@
 # bot/bot.py — Octopus Smart TG Bot (Render 24/7 部署版)
+# 版本: v2.1 | 2026-06-10 | 频道: @OctopusAITrader
 # 功能：智能信号推送（工作日每小时 / 周末每两小时）+ 市场开盘提醒 + 保活机制
 
 import os
@@ -330,12 +331,14 @@ CHANNEL_DISABLED = False
 if __name__ == "__main__":
     print("=" * 60)
     print("  Octopus Smart TG Bot — Render 24/7 部署版")
+    print("  版本: v2.1 | 2026-06-10 | 频道: @OctopusAITrader")
     print(f"  启动时间: {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')} CST")
     if CHANNEL_DISABLED:
         print("  ⚠️  频道推送已停用（CHANNEL_DISABLED = True）")
         print(f"  原目标频道: {SIGNAL_CID}")
     else:
-        print(f"  目标频道: {SIGNAL_CID}")
+        print(f"  ✅ 目标频道: {SIGNAL_CID}")
+        print("  📅 调度模式: 工作日每小时 / 周末每两小时")
     print("=" * 60)
 
     # 保活线程始终启动（防止 Render 休眠）
