@@ -26,16 +26,16 @@ RENDER_URL = os.environ.get("RENDER_URL", "https://octatrade-tg-bot.onrender.com
 TZ = pytz.timezone("Asia/Shanghai")  # CST (UTC+8)
 
 # 市场开盘提醒（UTC 时间，整点前10分钟提醒）
-# 格式: (UTC小时, UTC分钟, 名称, 时区, emoji, 交易时段描述)
+# 格式: (UTC小时, UTC分钟, [(地区名, emoji)...], 时区, 交易时段描述)
 MARKET_REMINDERS = [
-    (19, 50, "Wellington", "Pacific/Auckland",    "🇳🇿", "Mon-Fri | 07:00 NZST"),
-    (21, 50, "Sydney",     "Australia/Sydney",    "🇦🇺", "Mon-Fri | 08:00 AEST"),
-    (23, 50, "Tokyo",      "Asia/Tokyo",          "🇯🇵", "Mon-Fri | 09:00 JST"),
-    ( 0, 50, "Hong Kong / Singapore", "Asia/Hong_Kong", "🇸🇬", "Mon-Fri | 08:00 CST"),
-    ( 5, 50, "Dubai",      "Asia/Dubai",          "🇦🇪", "Sun-Thu | 09:00 GST"),
-    ( 6, 50, "London",     "Europe/London",       "🇬🇧", "Mon-Fri | 08:00 BST"),
-    (11, 50, "New York",   "US/Eastern",          "🇺🇸", "Mon-Fri | 08:00 EDT"),
-    (14, 50, "Los Angeles","US/Pacific",          "🇺🇸", "Mon-Fri | 08:00 PDT"),
+    (19, 50, [("Wellington",  "🇳🇿")],                          "Pacific/Auckland",  "Mon-Fri | 07:00 NZST"),
+    (21, 50, [("Sydney",      "🇦🇺")],                          "Australia/Sydney",  "Mon-Fri | 08:00 AEST"),
+    (23, 50, [("Tokyo",       "🇯🇵")],                          "Asia/Tokyo",        "Mon-Fri | 09:00 JST"),
+    ( 0, 50, [("Hong Kong",   "🇭🇰"), ("Singapore", "🇸🇬")],    "Asia/Hong_Kong",    "Mon-Fri | 08:00 CST"),
+    ( 5, 50, [("Dubai",       "🇦🇪")],                          "Asia/Dubai",        "Sun-Thu | 09:00 GST"),
+    ( 6, 50, [("London",      "🇬🇧")],                          "Europe/London",     "Mon-Fri | 08:00 BST"),
+    (11, 50, [("New York",    "🇺🇸")],                          "US/Eastern",        "Mon-Fri | 08:00 EDT"),
+    (14, 50, [("Los Angeles", "🇺🇸")],                          "US/Pacific",        "Mon-Fri | 08:00 PDT"),
 ]
 
 KEEP_ALIVE_INTERVAL = 600   # 10 分钟
@@ -260,16 +260,22 @@ def start_market_reminder():
             if not any(k.startswith(today_key) for k in last_sent):
                 last_sent.clear()
 
-            for utc_h, utc_m, name, tz_str, emoji, schedule in MARKET_REMINDERS:
+            for utc_h, utc_m, regions, tz_str, schedule in MARKET_REMINDERS:
                 send_key = f"{today_key}_{utc_h:02d}_{utc_m:02d}"
                 if send_key in last_sent:
                     continue
                 if now_utc.hour == utc_h and now_utc.minute >= utc_m and now_utc.minute < utc_m + WINDOW_MINUTES:
+                    emojis = "".join([e for _, e in regions])
+                    names  = " / ".join([n for n, _ in regions])
                     msg = (
-                        f"{emoji} {name} open in 10 min\n"
-                        f"📅 {schedule}"
+                        f"{emojis} <b>{names}</b> Forex market open in 10 min\n"
+                        f"Get ready and watch for volatility."
                     )
-                    payload = {"chat_id": SIGNAL_CID, "text": msg}
+                    payload = {
+                        "chat_id": SIGNAL_CID,
+                        "text": msg,
+                        "parse_mode": "HTML",
+                    }
                     result = tg_api("sendMessage", payload)
                     if result and result.get("ok"):
                         print(f"🔔 市场提醒已发送: {name}")
