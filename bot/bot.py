@@ -1,6 +1,6 @@
 # bot/bot.py — Octopus Smart TG Bot (Render 24/7 部署版)
-# 版本: v2.5 | 2026-06-11 | 频道: @OctopusAITrader
-# 功能：信号推送 + 市场开盘/休市提醒（含温馨语轮播、经济数据、假期提醒）
+# 版本: v2.6 | 2026-06-11 | 频道: @OctopusAITrader
+# 功能：信号推送 + 市场开盘/休市提醒 + 每日欢迎消息（19:00-23:00 CST随机）+ 保活机制
 
 import os
 import sys
@@ -358,6 +358,75 @@ def start_market_reminder():
     print("🔔 市场提醒线程已启动（开盘 + 休市 + 经济数据 + 温馨语轮播）")
 
 
+# ─── 线程 2.5：每日欢迎消息（随机时间）─────────────────────────────────────
+def start_daily_welcome():
+    """后台线程 — 每天 19:00–23:00 CST 随机时间发欢迎消息
+    引导新订阅者领取 38 算力 + 邀请码
+    """
+    last_sent_date = None   # 记录今天是否已发送
+    target_today  = None   # 今天的随机目标时间（CST）
+
+    def pick_random_target():
+        """在 19:00–23:00 CST 之间随机选一个分钟"""
+        now = datetime.now(TZ)
+        base = now.replace(hour=19, minute=0, second=0, microsecond=0)
+        rand_min = random.randint(0, 4 * 60 - 1)   # 0–239 分钟
+        return base + timedelta(minutes=rand_min)
+
+    def loop():
+        nonlocal last_sent_date, target_today
+        while True:
+            now = datetime.now(TZ)
+            today = now.strftime("%Y-%m-%d")
+
+            # 新的一天：重置状态，重新随机选时间
+            if today != last_sent_date:
+                last_sent_date = today
+                target_today  = pick_random_target()
+                print(f"🤖 今日欢迎消息目标时间: {target_today.strftime('%H:%M')} CST")
+
+            # 到达目标时间 → 发送
+            if target_today and now >= target_today:
+                msg = (
+                    "🤖 Welcome to <b>Octopus AI Trader · 章鱼智投</b>\n\n"
+                    "填写邀请码【SG4879】，立即获得 38 算力\n"
+                    "Enter invite code <b>[SG4879]</b> — get 38 credits\n\n"
+                    "⚠️ Investing involves risk."
+                )
+                keyboard = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "📝 Register", "url": "https://app.octopus-vision.com/html/html/register.html?code=C0144"},
+                            {"text": "📱 Download APP", "url": "https://www.octopus-vision.com/#download"},
+                        ],
+                        [
+                            {"text": "🔑 Copy Invite Code", "copy_text": {"text": "SG4879"}},
+                        ],
+                        [
+                            {"text": "🤝 Partnership: @rebecca_octopus", "url": "https://t.me/rebecca_octopus"},
+                        ],
+                    ]
+                }
+                payload = {
+                    "chat_id": SIGNAL_CID,
+                    "text": msg,
+                    "parse_mode": "HTML",
+                    "reply_markup": keyboard,
+                }
+                result = tg_api("sendMessage", payload)
+                if result and result.get("ok"):
+                    print(f"🤖 每日欢迎消息已发送 ({now.strftime('%H:%M')} CST)")
+                else:
+                    print(f"🤖 欢迎消息发送失败: {result}")
+                target_today = None   # 标记今天已发送
+
+            time.sleep(30)
+
+    t = threading.Thread(target=loop, daemon=True, name="DailyWelcome")
+    t.start()
+    print("🤖 每日欢迎消息线程已启动（19:00–23:00 CST 随机）")
+
+
 # ─── 线程 3：保活机制 ─────────────────────────────────────────────────────
 
 def start_keep_alive():
@@ -408,7 +477,7 @@ CHANNEL_DISABLED = False
 if __name__ == "__main__":
     print("=" * 60)
     print("  Octopus Smart TG Bot — Render 24/7 部署版")
-    print("  版本: v2.5 | 2026-06-11 | 频道: @OctopusAITrader")
+    print("  版本: v2.6 | 2026-06-11 | 频道: @OctopusAITrader")
     print(f"  启动时间: {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')} CST")
     if CHANNEL_DISABLED:
         print("  ⚠️  频道推送已停用（CHANNEL_DISABLED = True）")
@@ -425,9 +494,12 @@ if __name__ == "__main__":
         start_signal_scheduler()
         time.sleep(1)
         start_market_reminder()
+        time.sleep(1)
+        start_daily_welcome()
     else:
         print("⏸  信号推送已暂停")
         print("⏸  市场提醒已暂停")
+        print("⏸  每日欢迎消息已暂停")
         print("💓 仅保活 + Web 服务运行中...")
 
     start_web_server()
