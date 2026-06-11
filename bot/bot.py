@@ -1,6 +1,6 @@
 # bot/bot.py — Octopus Smart TG Bot (Render 24/7 部署版)
-# 版本: v2.2 | 2026-06-11 | 频道: @OctopusAITrader
-# 功能：智能信号推送（工作日每小时 / 周末每两小时）+ 市场开盘提醒（pytz自动夏令时）+ 保活机制
+# 版本: v2.3 | 2026-06-11 | 频道: @OctopusAITrader
+# 功能：智能信号推送（工作日每小时 / 周末每两小时）+ 市场开盘/休市提醒（pytz自动夏令时）+ 保活机制
 
 import os
 import sys
@@ -248,77 +248,103 @@ def start_signal_scheduler():
 
 # ─── 线程 2：市场开盘提醒 ─────────────────────────────────────────────────
 def start_market_reminder():
-    """后台线程 — 主要市场开盘前 10 分钟提醒
-    使用本地时间 + pytz 自动处理夏令时，无需手动切换
+    """后台线程 — 市场开盘提醒 + 周五休市提醒
+    使用本地时间 + pytz 自动处理夏令时
+    开盘温馨语：新一周开始 / 祝交易顺利
+    休市温馨语：辛苦一周 / 祝周末愉快
     """
-    def should_send_today(days_filter):
-        """根据 days_filter 判断今天是否应该提醒"""
-        if days_filter is None:
-            return True
-        now_cst = datetime.now(TZ)
-        return now_cst.weekday() in days_filter
+    def get_local_weekday(tz_str):
+        """获取指定时区的星期几（0=周一 ... 6=周日）"""
+        tz = pytz.timezone(tz_str)
+        return datetime.now(tz).weekday()
 
     def loop():
-        last_sent = set()  # 记录今天已发送的提醒
+        last_sent = set()  # 去重 key
         while True:
             now_utc = datetime.now(pytz.UTC)
-
-            # 每天清零（按 UTC 日期）
             today_key = now_utc.strftime("%Y-%m-%d")
+
+            # 每天 UTC 零点清零
             if not any(k.startswith(today_key) for k in last_sent):
                 last_sent.clear()
 
+            # ─── 开盘提醒 ───────────────────────────────────────
             for local_h, local_m, regions, tz_str, days_filter in MARKET_REMINDERS:
-                # 检查今天是否需要提醒
-                if not should_send_today(days_filter):
-                    continue
+                # days_filter 判断（用当地时区的星期几）
+                if days_filter is not None:
+                    if get_local_weekday(tz_str) not in days_filter:
+                        continue
 
-                # 获取该时区的当前时间
                 tz = pytz.timezone(tz_str)
                 now_local = datetime.now(tz)
-
-                # 构造今天的"目标时间"（本地时间）
                 target_local = now_local.replace(hour=local_h, minute=local_m, second=0, microsecond=0)
+                remind_start = target_local - timedelta(minutes=10)
+                remind_end   = target_local - timedelta(seconds=1)
 
-                # 计算"提醒窗口"：目标时间前 10 分钟内
-                remind_after  = target_local - timedelta(minutes=10)
-                remind_before = target_local - timedelta(seconds=1)
-
-                # 当前本地时间是否在提醒窗口内
-                in_window = remind_after <= now_local <= remind_before
-
-                if not in_window:
+                if not (remind_start <= now_local <= remind_end):
                     continue
 
-                # 去重：今天这个时区已发送过就不再发
-                send_key = f"{today_key}_{tz_str}_{local_h:02d}{local_m:02d}"
+                send_key = f"{today_key}_open_{tz_str}_{local_h:02d}{local_m:02d}"
                 if send_key in last_sent:
                     continue
 
-                # 发送提醒
                 emojis = "".join([e for _, e in regions])
                 names  = " / ".join([n for n, _ in regions])
+
+                # 温馨语：周一开盘用"新一周"，其他用"祝交易顺利"
+                is_monday = (get_local_weekday(tz_str) == 0)
+                if is_monday:
+                    greeting = "New week, new opportunities! 🚀"
+                else:
+                    greeting = "Wish you a profitable session! 📈"
+
                 msg = (
                     f"{emojis} <b>{names}</b> market open in 10 min\n"
-                    f"Get ready and watch for volatility."
+                    f"Get ready and watch for volatility.\n"
+                    f"{greeting}"
                 )
-                payload = {
+                result = tg_api("sendMessage", {
                     "chat_id": SIGNAL_CID,
                     "text": msg,
                     "parse_mode": "HTML",
-                }
-                result = tg_api("sendMessage", payload)
+                })
                 if result and result.get("ok"):
-                    print(f"🔔 市场提醒已发送: {names} ({tz_str} {local_h:02d}:{local_m:02d})")
+                    print(f"🔔 开盘提醒已发送: {names} ({tz_str})")
                     last_sent.add(send_key)
                 else:
-                    print(f"🔔 市场提醒发送失败: {names} — {result}")
+                    print(f"🔔 开盘提醒发送失败: {names} — {result}")
+
+            # ─── 休市提醒（周五 New York 收盘前 10 分钟）───
+            # New York 周五 16:50 本地 = 收盘 17:00 前 10 分钟
+            ny_tz = pytz.timezone("US/Eastern")
+            now_ny = datetime.now(ny_tz)
+            if now_ny.weekday() == 4:  # 周五
+                close_target = now_ny.replace(hour=16, minute=50, second=0, microsecond=0)
+                close_start = close_target
+                close_end   = close_target + timedelta(minutes=5)
+                send_key_close = f"{today_key}_close_ny"
+                if close_start <= now_ny <= close_end and send_key_close not in last_sent:
+                    msg = (
+                        "🇺🇸 <b>New York</b> market closes in 10 min\n"
+                        "Weekend is coming! 🎉\n"
+                        "Great job this week — enjoy your weekend! 🥂"
+                    )
+                    result = tg_api("sendMessage", {
+                        "chat_id": SIGNAL_CID,
+                        "text": msg,
+                        "parse_mode": "HTML",
+                    })
+                    if result and result.get("ok"):
+                        print("🔔 休市提醒已发送（周五纽约收盘）")
+                        last_sent.add(send_key_close)
+                    else:
+                        print(f"🔔 休市提醒发送失败: {result}")
 
             time.sleep(30)
 
     t = threading.Thread(target=loop, daemon=True, name="MarketReminder")
     t.start()
-    print("🔔 市场提醒线程已启动（本地时间 + pytz 自动夏令时）")
+    print("🔔 市场提醒线程已启动（开盘 + 休市，pytz 自动夏令时）")
 
 
 # ─── 线程 3：保活机制 ─────────────────────────────────────────────────────
