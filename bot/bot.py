@@ -34,9 +34,8 @@ MARKET_REMINDERS = [
     (6, 50, [("Wellington", "🇳🇿"), ("Sydney", "🇦🇺")], "Australia/Sydney",        [0]),
     # 亚洲主力时段
     (8, 50, [("Tokyo", "🇯🇵")],                              "Asia/Tokyo",              None),
-    # 欧洲盘（含 Frankfurt / Zurich / Paris）
-    (7, 50, [("London", "🇬🇧"), ("Frankfurt", "🇩🇪"),
-                     ("Zurich", "🇨🇭"), ("Paris", "🇫🇷")],       "Europe/London",            None),
+    # 欧洲盘（London 主盘，温馨语提示 Frankfurt/Zurich/Paris 即将开市）
+    (7, 50, [("London", "🇬🇧")],                              "Europe/London",            None),
     # 美盘（纽约本地 08:20 = 数据公布 CST 20:30 前 10 分钟）
     (8, 20, [("New York", "🇺🇸")],                        "US/Eastern",              None),
 ]
