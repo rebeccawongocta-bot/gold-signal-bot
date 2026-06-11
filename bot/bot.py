@@ -63,7 +63,7 @@ TIPS = {
     "London": [
         "London open — European liquidity floodgate opens 🇬🇧",
         "UK session starting — expect stronger moves in EUR/GBP 📈",
-        "Frankfurt & London now open — volatility ahead ⚡",
+        "Frankfurt 🇩🇪, Zurich 🇨🇭 & Paris 🇫🇷 opening soon.",
         "Wish you a profitable session! 📈",
     ],
     "New York": [
@@ -92,7 +92,7 @@ US_HOLIDAYS_2026 = {
     "12-24": "Christmas (obs)",
 }
 
-KEEP_ALIVE_INTERVAL = 600   # 10 分钟
+KEEP_ALIVE_INTERVAL = 300    # 5 分钟（保持 Render 唤醒）
 
 # ─── 工具函数 ────────────────────────────────────────────────────────────────
 
