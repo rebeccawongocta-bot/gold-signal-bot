@@ -1,11 +1,12 @@
 # bot/bot.py — Octopus Smart TG Bot (Render 24/7 部署版)
-# 版本: v2.3 | 2026-06-11 | 频道: @OctopusAITrader
-# 功能：智能信号推送（工作日每小时 / 周末每两小时）+ 市场开盘/休市提醒（pytz自动夏令时）+ 保活机制
+# 版本: v2.5 | 2026-06-11 | 频道: @OctopusAITrader
+# 功能：信号推送 + 市场开盘/休市提醒（含温馨语轮播、经济数据、假期提醒）
 
 import os
 import sys
 import time
 import json
+import random
 import threading
 import requests
 from datetime import datetime, timezone, timedelta
@@ -15,34 +16,85 @@ from flask import Flask, request
 
 # ─── 配置区 ────────────────────────────────────────────────────────────────
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8702664592:AAE7QP3z9Tc9lHegOhOnXuWWpGDWGZKlY7I")
-SIGNAL_CID = os.environ.get("SIGNAL_CID", "-1003899183014")   # @OctopusAITrader 新频道
+BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "8702664592:AAE7QP3z9Tc9lHegOhOnXuWWpGDWGZKlY7I")
+SIGNAL_CID = os.environ.get("SIGNAL_CID", "-1003899183014")
 
-OCTOPUS_API = "https://app.octopus-vision.com/prod-api/appHuginn/app-api/ai/quote-predict/latest"
+OCTOPUS_API     = "https://app.octopus-vision.com/prod-api/appHuginn/app-api/ai/quote-predict/latest"
 OCTOPUS_HEADERS = {"Client-Type": "ANDROID", "Platform": "OCTOPUS"}
 
 RENDER_URL = os.environ.get("RENDER_URL", "https://octatrade-tg-bot.onrender.com")
 
 TZ = pytz.timezone("Asia/Shanghai")  # CST (UTC+8)
 
-# 市场开盘提醒（本地时间定义，pytz 自动处理夏令时）
-# 格式: (本地小时, 本地分钟, [(地区名, emoji)...], 时区, 星期几)
-#   星期几: None=每天, [0]=仅周一, [6]=仅周日
-# pytz 会根据当前日期自动返回正确的时区（含夏令时），无需手动判断
+# ─── 市场开盘提醒配置 ─────────────────────────────────────────────────────────
+# 格式: (本地小时, 本地分钟, [(地区名, emoji), ...], 时区, 星期几过滤)
+#   星期几过滤: None=每天, [0]=仅周一, [4]=仅周五
 MARKET_REMINDERS = [
-    # 周一：整周开盘（Wellington + Sydney 合并提醒）
-    (6, 50, [("Wellington", "🇳🇿"), ("Sydney", "🇦🇺")], "Australia/Sydney", [0]),
-    # 亚洲主力时段开始
-    (8, 50, [("Tokyo", "🇯🇵")],                              "Asia/Tokyo",      None),
-    # 欧洲盘开始
-    (7, 50, [("London", "🇬🇧")],                              "Europe/London",    None),
-    # 美盘开始（美经济数据通常本地 08:30 公布，提前10分钟提醒）
-    (8, 20, [("New York", "🇺🇸")],                            "US/Eastern",       None),
+    # 周一：整周开盘（Wellington + Sydney 合并）
+    (6, 50, [("Wellington", "🇳🇿"), ("Sydney", "🇦🇺")], "Australia/Sydney",        [0]),
+    # 亚洲主力时段
+    (8, 50, [("Tokyo", "🇯🇵")],                              "Asia/Tokyo",              None),
+    # 欧洲盘（含 Frankfurt / Zurich / Paris）
+    (7, 50, [("London", "🇬🇧"), ("Frankfurt", "🇩🇪"),
+                     ("Zurich", "🇨🇭"), ("Paris", "🇫🇷")],       "Europe/London",            None),
+    # 美盘（纽约本地 08:20 = 数据公布 CST 20:30 前 10 分钟）
+    (8, 20, [("New York", "🇺🇸")],                        "US/Eastern",              None),
 ]
+
+# ─── 温馨语轮播池 ──────────────────────────────────────────────────────────
+# 每次开盘提醒随机选一条，避免视觉疲劳
+TIPS = {
+    "Wellington": [
+        "Asia-Pacific session starting — watch for early volatility 🌏",
+        "Sydney open — first liquidity of the week is flowing in 💧",
+        "New week, new opportunities! 🚀",
+    ],
+    "Sydney": [
+        "Asia-Pacific session starting — watch for early volatility 🌏",
+        "Sydney open — first liquidity of the week is flowing in 💧",
+        "New week, new opportunities! 🚀",
+    ],
+    "Tokyo": [
+        "Tokyo session starting — Asian liquidity is rising 📈",
+        "Asia session in progress — range-bound moves likely 📊",
+        "Tokyo open — watch JPY pairs for action 🇯🇵",
+        "Wish you a profitable session! 📈",
+    ],
+    "London": [
+        "London open — European liquidity floodgate opens 🇬🇧",
+        "UK session starting — expect stronger moves in EUR/GBP 📈",
+        "Frankfurt & London now open — volatility ahead ⚡",
+        "Wish you a profitable session! 📈",
+    ],
+    "New York": [
+        "US session open — Wall Street is waking up 🇺🇸",
+        "New York open — major data releases ahead, watch your risk! ⚠️",
+        "US market open — high liquidity, tight spreads. Trade safe! 📊",
+        "Non-farm payroll days: expect sharp moves. Set your stops! 🎯",
+        "Wish you a profitable session! 📈",
+    ],
+}
+
+# ─── 美国假期 2026（硬编码，每年更新一次）─────────────────────────────
+# 格式: "MM-DD"
+US_HOLIDAYS_2026 = {
+    "01-01": "New Year's Day",
+    "01-19": "Martin Luther King Jr. Day",
+    "02-16": "Presidents' Day",
+    "04-03": "Good Friday",
+    "05-25": "Memorial Day",
+    "06-19": "Juneteenth",
+    "07-04": "Independence Day",
+    "09-07": "Labor Day",
+    "11-26": "Thanksgiving Day",
+    "11-27": "Thanksgiving (obs)",
+    "12-25": "Christmas Day",
+    "12-24": "Christmas (obs)",
+}
 
 KEEP_ALIVE_INTERVAL = 600   # 10 分钟
 
-# ─── 工具函数 ──────────────────────────────────────────────────────────────
+# ─── 工具函数 ────────────────────────────────────────────────────────────────
 
 def tg_api(method, payload=None, timeout=15):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -53,8 +105,8 @@ def tg_api(method, payload=None, timeout=15):
         print(f"[TG API] {method} 失败: {e}")
         return None
 
+
 def fetch_octopus(symbol="XAUUSD"):
-    """从 Octopus API 获取最新 AI 预测"""
     try:
         url = f"{OCTOPUS_API}?systemCode={symbol}"
         resp = requests.get(url, headers=OCTOPUS_HEADERS, timeout=15)
@@ -66,54 +118,40 @@ def fetch_octopus(symbol="XAUUSD"):
         print(f"[Octopus] 获取 {symbol} 失败: {e}")
     return None
 
+
 def build_signal_message(symbol="XAUUSD"):
-    """构造推送消息（最终格式）"""
     data = fetch_octopus(symbol)
     if not data:
-        # XAUUSD 无返回时，尝试 BTCUSDT
         if symbol == "XAUUSD":
             print(f"[build_signal] {symbol} 无数据，尝试 BTCUSDT")
             return build_signal_message("BTCUSDT")
         return None
-
     try:
-        direction = data.get("direction", "NEUTRAL").upper()
-        prob      = int(data.get("directionProbability", 0))
-        support_p = data.get("supportPrice", "N/A")
-        resist_p  = data.get("resistancePrice", "N/A")
-        target_p  = data.get("targetPrice", "N/A")
-        change_r  = data.get("changeRate", "")
-        period    = data.get("updatePeriod", "1H")
-
-        # 解析品种名称
-        name_raw = data.get("name", "{}")
+        direction    = data.get("direction", "NEUTRAL").upper()
+        prob        = int(data.get("directionProbability", 0))
+        support_p   = data.get("supportPrice", "N/A")
+        resist_p    = data.get("resistancePrice", "N/A")
+        target_p    = data.get("targetPrice", "N/A")
+        change_r    = data.get("changeRate", "")
+        period      = data.get("updatePeriod", "1H")
+        name_raw    = data.get("name", "{}")
         try:
             name_obj = json.loads(name_raw)
-            sym_name = name_obj.get("en", symbol)
+            sym_name  = name_obj.get("en", symbol)
         except:
-            sym_name = symbol
-
-        # 解析 AI 分析（完整版，英文）
+            sym_name  = symbol
         suggestion_raw = data.get("suggestion", "{}")
         try:
-            sug = json.loads(suggestion_raw) if isinstance(suggestion_raw, str) else suggestion_raw
+            sug     = json.loads(suggestion_raw) if isinstance(suggestion_raw, str) else suggestion_raw
             ai_text = sug.get("en", str(suggestion_raw))
         except:
             ai_text = str(suggestion_raw)
-
         if direction == "UP":
-            emoji = "🔵"
-            arrow = "⬆️"
-            dir_text = "BUY"
+            emoji, arrow, dir_text = "🔵", "⬆️", "BUY"
         elif direction == "DOWN":
-            emoji = "🔴"
-            arrow = "⬇️"
-            dir_text = "SELL"
+            emoji, arrow, dir_text = "🔴", "⬇️", "SELL"
         else:
-            emoji = "⚪"
-            arrow = "➖"
-            dir_text = "HOLD"
-
+            emoji, arrow, dir_text = "⚪", "➖", "HOLD"
         lines = [
             f"{emoji} {symbol} · {sym_name}",
             f"{arrow} {dir_text}  {prob}%  |  {period}  |  {change_r}",
@@ -134,18 +172,11 @@ def build_signal_message(symbol="XAUUSD"):
 
 
 def send_signal_to_channel(symbol="XAUUSD"):
-    """推送信号到频道（使用最终格式）"""
     msg = build_signal_message(symbol)
     if not msg:
         print(f"[{datetime.now(TZ).strftime('%H:%M')}] ⚠️ 无法获取任何信号数据，跳过推送")
         return False
-
-    payload = {
-        "chat_id": SIGNAL_CID,
-        "text": msg,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
+    payload = {"chat_id": SIGNAL_CID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True}
     result = tg_api("sendMessage", payload)
     now_str = datetime.now(TZ).strftime("%m-%d %H:%M")
     if result and result.get("ok"):
@@ -159,149 +190,130 @@ def send_signal_to_channel(symbol="XAUUSD"):
 # ─── 线程 1：信号调度器 ────────────────────────────────────────────────────
 
 def start_signal_scheduler():
-    """后台线程 — 智能推送调度
-    周一至周五：每小时推送一次（XAUUSD 优先，无返回时推 BTCUSDT）
-    周六至周日：每两小时推送一次（推 BTCUSDT）
-    """
     def should_push_now():
-        """判断是否应该推送（根据星期几）"""
         now = datetime.now(TZ)
-        weekday = now.weekday()  # 0=周一, 6=周日
-        
-        if weekday <= 4:  # 周一至周五：每小时推送
-            return True
-        else:  # 周六、周日：每两小时推送（仅在偶数小时）
-            return now.hour % 2 == 0
-
+        return now.weekday() <= 4 or (now.weekday() > 4 and now.hour % 2 == 0)
     def get_symbol_for_time():
-        """根据时间决定推送品种"""
-        now = datetime.now(TZ)
-        weekday = now.weekday()
-        
-        if weekday <= 4:  # 周一至周五：优先 XAUUSD
-            return "XAUUSD"
-        else:  # 周六、周日：推 BTCUSDT（XAUUSD 休市）
-            return "BTCUSDT"
-
+        return "XAUUSD" if datetime.now(TZ).weekday() <= 4 else "BTCUSDT"
     def loop():
-        """主循环 — 在 :05 分推送"""
-        # 启动时补发逻辑（如果当前已过 :05，立即补发）
         now = datetime.now(TZ)
         print(f"⏰ 信号调度器启动（{now.strftime('%Y-%m-%d %H:%M')} CST）")
-        
         current_minute = now.minute
         if current_minute >= 5 and should_push_now():
             try:
-                symbol = get_symbol_for_time()
-                print(f"⏰ 启动时补发: {symbol}")
-                send_signal_to_channel(symbol)
+                print(f"⏰ 启动时补发: {get_symbol_for_time()}")
+                send_signal_to_channel(get_symbol_for_time())
             except Exception as e:
                 print(f"⏰ 补发失败: {e}")
-
         while True:
             now = datetime.now(TZ)
-            
-            # 计算下一个 :05 分时间点
-            if now.weekday() <= 4:  # 周一至周五：每小时 :05
+            if now.weekday() <= 4:
                 target = now.replace(minute=5, second=0, microsecond=0)
-                if now.minute >= 5:  # 已过当前小时的 :05，跳到下一小时
+                if now.minute >= 5:
                     target += timedelta(hours=1)
                 sleep_secs = (target - now).total_seconds()
                 print(f"⏰ 下次推送: {target.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）— 工作日模式")
-                
-            else:  # 周六、周日：每两小时 :05（仅在偶数小时）
-                # 找到下一个偶数小时的 :05
+            else:
                 next_even = now.replace(minute=5, second=0, microsecond=0)
                 if next_even.hour % 2 != 0 or now.minute > 5:
-                    # 当前是奇数小时，或者已过 :05，跳到下一个偶数小时
                     if next_even.hour % 2 != 0:
                         next_even += timedelta(hours=1)
                     else:
                         next_even += timedelta(hours=2)
-                
-                # 确保是偶数小时
                 while next_even.hour % 2 != 0:
                     next_even += timedelta(hours=1)
-                
                 if next_even <= now:
                     next_even += timedelta(hours=2)
-                
                 sleep_secs = (next_even - now).total_seconds()
                 print(f"⏰ 下次推送: {next_even.strftime('%H:%M')} CST（{sleep_secs/60:.1f} 分钟后）— 周末模式")
                 target = next_even
-
             time.sleep(sleep_secs)
-
-            # 到达推送时间
             if should_push_now():
-                symbol = get_symbol_for_time()
                 try:
-                    send_signal_to_channel(symbol)
+                    send_signal_to_channel(get_symbol_for_time())
                 except Exception as e:
                     print(f"⏰ 定时信号推送异常: {e}")
-
-            time.sleep(60)  # 防止同一时段重复推送
-
+            time.sleep(60)
     t = threading.Thread(target=loop, daemon=True, name="SignalScheduler")
     t.start()
     print("⏰ 信号调度器线程已启动（工作日每小时 / 周末每两小时）")
 
-# ─── 线程 2：市场开盘提醒 ─────────────────────────────────────────────────
-def start_market_reminder():
-    """后台线程 — 市场开盘提醒 + 周五休市提醒
-    使用本地时间 + pytz 自动处理夏令时
-    开盘温馨语：新一周开始 / 祝交易顺利
-    休市温馨语：辛苦一周 / 祝周末愉快
-    """
-    def get_local_weekday(tz_str):
-        """获取指定时区的星期几（0=周一 ... 6=周日）"""
-        tz = pytz.timezone(tz_str)
-        return datetime.now(tz).weekday()
 
+# ─── 线程 2：市场开盘 + 休市提醒 ─────────────────────────────────────────
+# 功能：开盘温馨语轮播 + 欧洲城市联动 + 美国假期/经济数据提醒
+
+def is_first_friday(dt_ny):
+    """判断今天是否是本月第一个周五"""
+    return dt_ny.weekday() == 4 and dt_ny.day <= 7
+
+def is_us_holiday(dt_ny):
+    """判断今天是否是美国假期"""
+    key = dt_ny.strftime("%m-%d")
+    return US_HOLIDAYS_2026.get(key)
+
+def get_random_tip(region_name):
+    """从温馨语池中随机选一条"""
+    tips = TIPS.get(region_name)
+    if tips:
+        return random.choice(tips)
+    return "Wish you a profitable session! 📈"
+
+def start_market_reminder():
+    """后台线程 — 市场开盘提醒 + 周五休市提醒"""
     def loop():
-        last_sent = set()  # 去重 key
+        last_sent = set()
         while True:
             now_utc = datetime.now(pytz.UTC)
             today_key = now_utc.strftime("%Y-%m-%d")
-
-            # 每天 UTC 零点清零
             if not any(k.startswith(today_key) for k in last_sent):
                 last_sent.clear()
 
-            # ─── 开盘提醒 ───────────────────────────────────────
+            # ── 开盘提醒 ─────────────────────────────────────────────────
             for local_h, local_m, regions, tz_str, days_filter in MARKET_REMINDERS:
-                # days_filter 判断（用当地时区的星期几）
                 if days_filter is not None:
-                    if get_local_weekday(tz_str) not in days_filter:
+                    tz_chk = pytz.timezone(tz_str)
+                    if datetime.now(tz_chk).weekday() not in days_filter:
                         continue
 
                 tz = pytz.timezone(tz_str)
                 now_local = datetime.now(tz)
                 target_local = now_local.replace(hour=local_h, minute=local_m, second=0, microsecond=0)
-                remind_start = target_local - timedelta(minutes=10)
-                remind_end   = target_local - timedelta(seconds=1)
+                remind_after  = target_local - timedelta(minutes=10)
+                remind_before = target_local - timedelta(seconds=1)
 
-                if not (remind_start <= now_local <= remind_end):
+                if not (remind_after <= now_local <= remind_before):
                     continue
 
                 send_key = f"{today_key}_open_{tz_str}_{local_h:02d}{local_m:02d}"
                 if send_key in last_sent:
                     continue
 
-                emojis = "".join([e for _, e in regions])
-                names  = " / ".join([n for n, _ in regions])
+                emojis   = "".join([e for _, e in regions])
+                names    = " / ".join([n for n, _ in regions])
+                # 用第一个地区的温馨语（随机轮播）
+                primary   = regions[0][0]
+                tip      = get_random_tip(primary)
 
-                # 温馨语：周一开盘用"新一周"，其他用"祝交易顺利"
-                is_monday = (get_local_weekday(tz_str) == 0)
-                if is_monday:
-                    greeting = "New week, new opportunities! 🚀"
-                else:
-                    greeting = "Wish you a profitable session! 📈"
+                # ── 纽约时段额外检查：经济数据 / 假期 ─────────────
+                data_note = ""
+                if tz_str == "US/Eastern":
+                    dt_ny = datetime.now(tz)
+                    # 周四：初请失业金
+                    if dt_ny.weekday() == 3:
+                        data_note = "\n📋 <b>Initial Jobless Claims</b> in 10 min — US labor data ahead."
+                    # 每月第一个周五：非农
+                    if is_first_friday(dt_ny):
+                        data_note = "\n📊 <b>Non-Farm Payroll (NFP)</b> in 10 min — expect high volatility!"
+                    # 美国假期
+                    holiday = is_us_holiday(dt_ny)
+                    if holiday:
+                        data_note += f"\n� holiday <b>{holiday}</b> today — US market liquidity may be lower."
 
                 msg = (
                     f"{emojis} <b>{names}</b> market open in 10 min\n"
                     f"Get ready and watch for volatility.\n"
-                    f"{greeting}"
+                    f"{tip}"
+                    f"{data_note}"
                 )
                 result = tg_api("sendMessage", {
                     "chat_id": SIGNAL_CID,
@@ -314,11 +326,10 @@ def start_market_reminder():
                 else:
                     print(f"🔔 开盘提醒发送失败: {names} — {result}")
 
-            # ─── 休市提醒（周五 New York 收盘前 10 分钟）───
-            # New York 周五 16:50 本地 = 收盘 17:00 前 10 分钟
+            # ── 休市提醒（周五 New York 收盘前 10 分钟）────────────
             ny_tz = pytz.timezone("US/Eastern")
             now_ny = datetime.now(ny_tz)
-            if now_ny.weekday() == 4:  # 周五
+            if now_ny.weekday() == 4:
                 close_target = now_ny.replace(hour=16, minute=50, second=0, microsecond=0)
                 close_start = close_target
                 close_end   = close_target + timedelta(minutes=5)
@@ -344,13 +355,12 @@ def start_market_reminder():
 
     t = threading.Thread(target=loop, daemon=True, name="MarketReminder")
     t.start()
-    print("🔔 市场提醒线程已启动（开盘 + 休市，pytz 自动夏令时）")
+    print("🔔 市场提醒线程已启动（开盘 + 休市 + 经济数据 + 温馨语轮播）")
 
 
 # ─── 线程 3：保活机制 ─────────────────────────────────────────────────────
 
 def start_keep_alive():
-    """每 10 分钟 ping 自己，防止 Render 免费版休眠"""
     def ping():
         while True:
             try:
@@ -359,13 +369,12 @@ def start_keep_alive():
             except Exception as e:
                 print(f"💓 Keep-alive 错误: {e}")
             time.sleep(KEEP_ALIVE_INTERVAL)
-
     t = threading.Thread(target=ping, daemon=True, name="KeepAlive")
     t.start()
     print("💓 保活线程已启动")
 
 
-# ─── 线程 4：Flask Web 服务（接收 Telegram Webhook）───────────────────────
+# ─── 线程 4：Flask Web 服务 ───────────────────────────────────────────────
 
 app = Flask(__name__)
 
@@ -375,19 +384,15 @@ def health_check():
 
 @app.route(f"/webhook/{BOT_TOKEN.split(':')[0]}", methods=["POST"])
 def telegram_webhook():
-    """接收 Telegram 用户消息（预留，用于未来行情问答功能）"""
     data = request.get_json(force=True, silent=True)
     if not data:
         return {"ok": False}, 400
-
     message = data.get("message", {})
-    text = message.get("text", "").strip()
+    text    = message.get("text", "").strip()
     chat_id = message.get("chat", {}).get("id")
-
     if text and chat_id:
         tg_api("sendMessage", {"chat_id": chat_id, "text": f"Received: {text}\n(AI Q&A coming soon)"})
         print(f"[Webhook] 收到消息 from {chat_id}: {text[:50]}")
-
     return {"ok": True}
 
 def start_web_server():
@@ -397,23 +402,22 @@ def start_web_server():
 
 
 # ─── 主程序 ────────────────────────────────────────────────────────────────
-# CHANNEL_DISABLED = True  → 停止所有频道推送，只保留 Web 服务空转
+
 CHANNEL_DISABLED = False
 
 if __name__ == "__main__":
     print("=" * 60)
     print("  Octopus Smart TG Bot — Render 24/7 部署版")
-    print("  版本: v2.1 | 2026-06-10 | 频道: @OctopusAITrader")
+    print("  版本: v2.5 | 2026-06-11 | 频道: @OctopusAITrader")
     print(f"  启动时间: {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')} CST")
     if CHANNEL_DISABLED:
         print("  ⚠️  频道推送已停用（CHANNEL_DISABLED = True）")
-        print(f"  原目标频道: {SIGNAL_CID}")
     else:
         print(f"  ✅ 目标频道: {SIGNAL_CID}")
         print("  📅 调度模式: 工作日每小时 / 周末每两小时")
+        print("  💬 开盘提醒: 温馨语轮播 + 经济数据 + 假期检测")
     print("=" * 60)
 
-    # 保活线程始终启动（防止 Render 休眠）
     start_keep_alive()
     time.sleep(1)
 
@@ -426,5 +430,4 @@ if __name__ == "__main__":
         print("⏸  市场提醒已暂停")
         print("💓 仅保活 + Web 服务运行中...")
 
-    # 主线程运行 Web 服务（Render 要求端口监听）
     start_web_server()
