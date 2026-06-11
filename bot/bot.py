@@ -389,8 +389,8 @@ def start_daily_welcome():
             if target_today and now >= target_today:
                 msg = (
                     "🤖 Welcome to <b>Octopus AI Trader</b>\n\n"
-                    "填写邀请码【SG4879】立即获得38算力\n"
-                    "Enter invite code [SG4879] — get 38 credits"
+                    "填写邀请码【SG4879】领取38算力\n"
+                    "Invite code [SG4879] — get 38 credits"
                 )
                 keyboard = {
                     "inline_keyboard": [
