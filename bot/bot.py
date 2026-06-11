@@ -360,21 +360,27 @@ def start_market_reminder():
 
 # ─── 线程 2.5：每日欢迎消息（随机时间）─────────────────────────────────────
 def start_daily_welcome():
-    """后台线程 — 每天 19:00–23:00 CST 随机时间发欢迎消息
+    """后台线程 — 每天 14:00–18:00 和 19:00–23:00 CST 各随机发一次欢迎消息
     引导新订阅者领取 38 算力 + 邀请码
     """
-    last_sent_date = None   # 记录今天是否已发送
-    target_today  = None   # 今天的随机目标时间（CST）
+    last_sent_date = None   # 记录今天日期（用于跨天重置）
+    targets_today  = []     # 今天的随机目标时间列表 [(datetime, sent_flag), ...]
 
-    def pick_random_target():
-        """在 19:00–23:00 CST 之间随机选一个分钟"""
+    def pick_random_targets():
+        """在 14:00–18:00 和 19:00–23:00 CST 各选一个随机时间"""
         now = datetime.now(TZ)
-        base = now.replace(hour=19, minute=0, second=0, microsecond=0)
-        rand_min = random.randint(0, 4 * 60 - 1)   # 0–239 分钟
-        return base + timedelta(minutes=rand_min)
+        # 第一档：14:00–18:00 = 0–239 分钟
+        base1 = now.replace(hour=14, minute=0, second=0, microsecond=0)
+        rand1 = random.randint(0, 4 * 60 - 1)
+        t1 = base1 + timedelta(minutes=rand1)
+        # 第二档：19:00–23:00 = 0–239 分钟
+        base2 = now.replace(hour=19, minute=0, second=0, microsecond=0)
+        rand2 = random.randint(0, 4 * 60 - 1)
+        t2 = base2 + timedelta(minutes=rand2)
+        return [(t1, False), (t2, False)]
 
     def loop():
-        nonlocal last_sent_date, target_today
+        nonlocal last_sent_date, targets_today
         while True:
             now = datetime.now(TZ)
             today = now.strftime("%Y-%m-%d")
@@ -382,48 +388,51 @@ def start_daily_welcome():
             # 新的一天：重置状态，重新随机选时间
             if today != last_sent_date:
                 last_sent_date = today
-                target_today  = pick_random_target()
-                print(f"🤖 今日欢迎消息目标时间: {target_today.strftime('%H:%M')} CST")
+                targets_today  = pick_random_targets()
+                t1_str = targets_today[0][0].strftime('%H:%M')
+                t2_str = targets_today[1][0].strftime('%H:%M')
+                print(f"🤖 今日欢迎消息目标时间: {t1_str} CST / {t2_str} CST")
 
-            # 到达目标时间 → 发送
-            if target_today and now >= target_today:
-                msg = (
-                    "🤖 Welcome to <b>Octopus AI Trader</b>\n\n"
-                    "填写邀请码【SG4879】领取38算力\n"
-                    "Invite code [SG4879] — get 38 credits"
-                )
-                keyboard = {
-                    "inline_keyboard": [
-                        [
-                            {"text": "📝 Register", "url": "https://app.octopus-vision.com/html/html/register.html?code=C0144"},
-                            {"text": "📱 Download APP", "url": "https://www.octopus-vision.com/#download"},
-                        ],
-                        [
-                            {"text": "🔑 Copy Invite Code", "copy_text": {"text": "SG4879"}},
-                        ],
-                        [
-                            {"text": "🤝 Partnership: @rebecca_octopus", "url": "https://t.me/rebecca_octopus"},
-                        ],
-                    ]
-                }
-                payload = {
-                    "chat_id": SIGNAL_CID,
-                    "text": msg,
-                    "parse_mode": "HTML",
-                    "reply_markup": keyboard,
-                }
-                result = tg_api("sendMessage", payload)
-                if result and result.get("ok"):
-                    print(f"🤖 每日欢迎消息已发送 ({now.strftime('%H:%M')} CST)")
-                else:
-                    print(f"🤖 欢迎消息发送失败: {result}")
-                target_today = None   # 标记今天已发送
+            # 检查是否到达任一目标时间
+            for i, (target_time, sent) in enumerate(targets_today):
+                if not sent and now >= target_time:
+                    msg = (
+                        "🤖 Welcome to <b>Octopus AI Trader</b>\n\n"
+                        "填写邀请码【SG4879】领取38算力\n"
+                        "Invite code [SG4879] — get 38 credits"
+                    )
+                    keyboard = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "📝 Register", "url": "https://app.octopus-vision.com/html/html/register.html?code=C0144"},
+                                {"text": "📱 Download APP", "url": "https://www.octopus-vision.com/#download"},
+                            ],
+                            [
+                                {"text": "🔑 Copy Invite Code", "copy_text": {"text": "SG4879"}},
+                            ],
+                            [
+                                {"text": "🤝 Partnership: @rebecca_octopus", "url": "https://t.me/rebecca_octopus"},
+                            ],
+                        ]
+                    }
+                    payload = {
+                        "chat_id": SIGNAL_CID,
+                        "text": msg,
+                        "parse_mode": "HTML",
+                        "reply_markup": keyboard,
+                    }
+                    result = tg_api("sendMessage", payload)
+                    if result and result.get("ok"):
+                        print(f"🤖 每日欢迎消息已发送 ({now.strftime('%H:%M')} CST)")
+                    else:
+                        print(f"🤖 欢迎消息发送失败: {result}")
+                    targets_today[i] = (target_time, True)
 
             time.sleep(30)
 
     t = threading.Thread(target=loop, daemon=True, name="DailyWelcome")
     t.start()
-    print("🤖 每日欢迎消息线程已启动（19:00–23:00 CST 随机）")
+    print("🤖 每日欢迎消息线程已启动（14:00–18:00 + 19:00–23:00 CST 随机各一次）")
 
 
 # ─── 线程 3：保活机制 ─────────────────────────────────────────────────────
