@@ -1,6 +1,6 @@
 # bot/bot.py — Octopus Smart TG Bot (Render 24/7 部署版)
-# 版本: v2.6 | 2026-06-11 | 频道: @OctopusAITrader
-# 功能：信号推送 + 市场开盘/休市提醒 + 每日欢迎消息（19:00-23:00 CST随机）+ 保活机制
+# 版本: v2.7 | 2026-06-12 | 频道: @OctopusAITrader
+# 功能：信号推送 + 市场开盘/休市提醒 + 每日欢迎消息（14:00-18:00 + 19:00-23:00 CST随机）+ 保活机制
 
 import os
 import sys
@@ -397,8 +397,10 @@ def start_daily_welcome():
                 if not sent and now >= target_time:
                     msg = (
                         "🤖 Welcome to <b>Octopus AI Trader</b>\n\n"
-                        "填写邀请码【SG4879】领取38算力\n"
-                        "Invite code [SG4879] — get 38 credits"
+                        "📲 下载官方APP获取更多品种AI预测\n"
+                        "📲 Download APP for Silver, Oil, ETH, EUR & more\n\n"
+                        "🎁 填写邀请码【SG4879】领取38算力\n"
+                        "🎁 Invite code [SG4879] — get 38 credits"
                     )
                     keyboard = {
                         "inline_keyboard": [
