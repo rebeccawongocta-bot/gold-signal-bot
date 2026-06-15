@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # bot/bot_zh.py — Octopus Smart TG Bot (中文频道版)
-# 版本: v1.0 | 2026-06-15 | 频道: @OctopusAITrader_ZH
-# 功能：信号推送(中文) + 市场开盘/休市提醒(中文) + 每日欢迎消息(中文) + 保活机制
+# 版本: v1.1 | 2026-06-15 | 频道: @OctopusAITrader_ZH
+# 功能：信号推送(中文) + 市场开盘/休市提醒(中文) + 每日欢迎消息(中文) + HTTP保活
 
 import os
 import sys
@@ -13,6 +13,7 @@ import logging
 import requests
 import pytz
 from datetime import datetime, timedelta, timezone
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ─── 配置区 ──────────────────────────────────────────────────────────────
 
@@ -416,17 +417,130 @@ def start_daily_welcome():
             time.sleep(30)
 
 
-# ─── 保活机制 ─────────────────────────────────────────────────────────────
+# ─── HTTP 保活服务器 ──────────────────────────────────────────────────────
 
-def keep_alive():
-    """后台线程 — 每5分钟ping自己，防止Render休眠"""
-    log.info("  [保活] 保活线程启动")
+class HealthHandler(BaseHTTPRequestHandler):
+    """Render 健康检查接口 — 返回 200 OK"""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            "status": "ok",
+            "channel": "zh",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }).encode())
+
+    def log_message(self, format, *args):
+        log.debug(f"  [HTTP] {format % args}")
+
+
+def start_http_server(port=10000):
+    """启动 HTTP 保活服务器（主线程阻塞运行）"""
+    try:
+        port = int(os.environ.get("PORT", port))
+    except:
+        port = port
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    log.info(f"  [HTTP] 保活服务器已启动，端口: {port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    server.server_close()
+
+
+# ─── 主函数 ────────────────────────────────────────────────────────────────
+
+def main():
+    log.info("=" * 60)
+    log.info("Octopus Smart TG Bot (中文频道版) v1.1 启动")
+    log.info(f"  中文频道 ID: {CHINESE_CID}")
+    log.info("=" * 60)
+
+    # 测试 Bot Token
+    me = tg_api("getMe")
+    if not me or not me.get("ok"):
+        log.error("  Bot Token 无效，退出")
+        sys.exit(1)
+
+    bot_username = me["result"]["username"]
+    log.info(f"  Bot 用户名: @{bot_username}")
+
+    # 启动后台线程（全部 daemon）
+    import threading
+
+    # 1. 信号推送线程
+    t_signal = threading.Thread(target=start_signal_loop, daemon=True)
+    t_signal.start()
+    log.info("  [✓] 信号推送线程已启动")
+
+    # 2. 市场提醒线程
+    t_reminder = threading.Thread(target=start_market_reminder, daemon=True)
+    t_reminder.start()
+    log.info("  [✓] 市场提醒线程已启动")
+
+    # 3. 每日欢迎消息线程
+    t_welcome = threading.Thread(target=start_daily_welcome, daemon=True)
+    t_welcome.start()
+    log.info("  [✓] 每日欢迎消息线程已启动")
+
+    # 4. 自我保活线程（ping 自己的 HTTP 端口）
+    t_keepalive = threading.Thread(target=keep_alive_self, daemon=True)
+    t_keepalive.start()
+    log.info("  [✓] 自我保活线程已启动")
+
+    # 主线程：启动 HTTP 服务器（阻塞，Render 需要这个端口存活检测）
+    start_http_server()
+
+
+# ─── 信号推送循环（独立线程） ────────────────────────────────────────────
+
+def start_signal_loop():
+    """后台线程 — 定时推送信号"""
+    log.info("  [信号] 信号推送循环启动")
+    last_signal_time = None
+
+    while True:
+        try:
+            now = datetime.now(pytz.timezone("Asia/Shanghai"))
+            weekday = now.weekday()
+
+            should_send = False
+
+            if weekday < 5:  # 工作日
+                if now.minute == 5 and (last_signal_time is None or (now - last_signal_time).total_seconds() > 3000):
+                    should_send = True
+            else:  # 周末
+                if now.minute == 5 and now.hour % 2 == 0 and (last_signal_time is None or (now - last_signal_time).total_seconds() > 3000):
+                    should_send = True
+
+            if should_send:
+                send_signal_to_channel()
+                last_signal_time = now
+
+            time.sleep(60)
+
+        except Exception as e:
+            log.warning(f"  [信号] 异常: {e}")
+            time.sleep(60)
+
+
+# ─── 自我保活 ──────────────────────────────────────────────────────────────
+
+def keep_alive_self():
+    """后台线程 — 每5分钟 ping 自己的 HTTP 端口，防止 Render 免费版休眠"""
+    log.info("  [保活] 自我保活线程启动")
+    
+    # 等待 HTTP 服务器启动
+    time.sleep(10)
+
     render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
-    
     if not render_url:
-        log.warning("  [保活] 未设置 RENDER_EXTERNAL_URL，保活功能禁用")
-        return
-    
+        # 尝试用 RENDER_URL 或从 PORT 构造
+        port = os.environ.get("PORT", "10000")
+        render_url = f"http://localhost:{port}"
+
     while True:
         try:
             time.sleep(300)  # 5分钟
@@ -434,83 +548,6 @@ def keep_alive():
             log.info(f"  [保活] ping {render_url} -> {r.status_code}")
         except Exception as e:
             log.warning(f"  [保活] ping失败: {e}")
-
-
-# ─── 主函数 ────────────────────────────────────────────────────────────────
-
-def main():
-    log.info("=" * 60)
-    log.info("Octopus Smart TG Bot (中文频道版) v1.0 启动")
-    log.info(f"  中文频道 ID: {CHINESE_CID}")
-    log.info("=" * 60)
-    
-    # 测试 Bot Token
-    me = tg_api("getMe")
-    if not me or not me.get("ok"):
-        log.error("  Bot Token 无效，退出")
-        sys.exit(1)
-    
-    bot_username = me["result"]["username"]
-    log.info(f"  Bot 用户名: @{bot_username}")
-    
-    # 启动后台线程
-    import threading
-    
-    # 1. 市场提醒线程
-    t_reminder = threading.Thread(target=start_market_reminder, daemon=True)
-    t_reminder.start()
-    log.info("  [✓] 市场提醒线程已启动")
-    
-    # 2. 每日欢迎消息线程
-    t_welcome = threading.Thread(target=start_daily_welcome, daemon=True)
-    t_welcome.start()
-    log.info("  [✓] 每日欢迎消息线程已启动")
-    
-    # 3. 保活线程
-    t_keepalive = threading.Thread(target=keep_alive, daemon=True)
-    t_keepalive.start()
-    log.info("  [✓] 保活线程已启动")
-    
-    # 主线程：定时推送信号
-    log.info("  [✓] 主线程进入信号推送循环")
-    
-    # 推送时间表（CST 时间）
-    # 工作日：每小时推送一次
-    # 周末：每2小时推送一次
-    last_signal_time = None
-    
-    while True:
-        try:
-            now = datetime.now(pytz.timezone("Asia/Shanghai"))
-            weekday = now.weekday()  # 0=周一, 6=周日
-            
-            # 判断是否应该推送
-            should_send = False
-            
-            if weekday < 5:  # 工作日
-                # 每小时的第5分钟推送
-                if now.minute == 5 and (last_signal_time is None or (now - last_signal_time).total_seconds() > 3000):
-                    should_send = True
-            else:  # 周末
-                # 每2小时推送一次（00:05, 02:05, 04:05, ...）
-                if now.minute == 5 and now.hour % 2 == 0 and (last_signal_time is None or (now - last_signal_time).total_seconds() > 3000):
-                    should_send = True
-            
-            if should_send:
-                send_signal_to_channel()
-                last_signal_time = now
-            
-            # 每分钟检查一次
-            time.sleep(60)
-            
-        except KeyboardInterrupt:
-            log.info("  收到退出信号，正在退出...")
-            break
-        except Exception as e:
-            log.warning(f"  主循环异常: {e}")
-            time.sleep(60)
-    
-    log.info("Bot 已停止")
 
 
 if __name__ == "__main__":
