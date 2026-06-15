@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # bot/bot_zh.py — Octopus Smart TG Bot (中文频道版)
-# 版本: v1.1 | 2026-06-15 | 频道: @OctopusAITrader_ZH
+# 版本: v1.2 | 2026-06-15 | 频道: @OctopusAITrader_ZH
 # 功能：信号推送(中文) + 市场开盘/休市提醒(中文) + 每日欢迎消息(中文) + HTTP保活
 
 import os
@@ -51,19 +51,16 @@ def tg_api(method, payload=None, retries=3):
 
 
 def fetch_octopus(symbol="XAUUSD"):
+    """调用 Octopus API 获取信号数据（与 bot.py 保持一致）"""
     try:
-        r = requests.get(
-            OCTOPUS_API,
-            params={"symbol": symbol},
-            headers=OCTOPUS_HEADERS,
-            timeout=10
-        )
-        r.raise_for_status()
-        data = r.json()
-        if data.get("code") == 200 or data.get("code") == 0:
-            return data.get("data") or data.get("result")
+        url = f"{OCTOPUS_API}?systemCode={symbol}"
+        resp = requests.get(url, headers=OCTOPUS_HEADERS, timeout=15)
+        data = resp.json()
+        if data.get("code") == 200 and data.get("data"):
+            return data["data"]
+        log.warning(f"  [API] {symbol} 返回异常: {data}")
     except Exception as e:
-        log.warning(f"  fetch_octopus {symbol} 失败: {e}")
+        log.warning(f"  [API] 获取 {symbol} 失败: {e}")
     return None
 
 
