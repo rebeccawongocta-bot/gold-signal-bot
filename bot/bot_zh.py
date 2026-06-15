@@ -362,11 +362,10 @@ def start_daily_welcome():
                 if not sent_flag and now >= target_time:
                     # 发送欢迎消息（中文版）
                     msg = (
-                        "🤖 欢迎来到 <b>Octopus AI Trader</b>\n\n"
+                        "🤖 欢迎来到 章鱼智投\n\n"
                         "📲 下载官方APP获取更多品种AI预测\n"
                         "📲 白银、原油、ETH、欧元等\n\n"
-                        "🎁 填写邀请码【SG4879】领取38算力\n"
-                        "🎁 Invite code [SG4879] — get 38 credits"
+                        "🎁 填写邀请码【SG4879】领取38算力"
                     )
                     
                     payload = {
