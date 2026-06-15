@@ -397,11 +397,10 @@ def start_daily_welcome():
             for i, (target_time, sent) in enumerate(targets_today):
                 if not sent and now >= target_time:
                     msg = (
-                        "🤖 Welcome to <b>Octopus AI Trader</b>\n\n"
-                        "📲 下载官方APP获取更多品种AI预测\n"
-                        "📲 Download APP for Silver, Oil, ETH, EUR & more\n\n"
-                        "🎁 填写邀请码【SG4879】领取38算力\n"
-                        "🎁 Invite code [SG4879] — get 38 credits"
+                        "🤖 Welcome to Octopus AI Trader\n\n"
+                        "📲 Download our APP for more AI predictions\n"
+                        "📲 Silver · Crude Oil · ETH · EUR & more\n\n"
+                        "🎁 Invite code 【SG4879】 — Get 38 Credits!"
                     )
                     keyboard = {
                         "inline_keyboard": [
