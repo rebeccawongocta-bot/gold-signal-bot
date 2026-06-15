@@ -121,13 +121,13 @@ def build_signal_message(symbol="XAUUSD"):
         name_raw    = data.get("name", "{}")
         try:
             name_obj = json.loads(name_raw)
-            sym_name  = name_obj.get("en", symbol)
+            sym_name  = name_obj.get("zh") or name_obj.get("tc") or name_obj.get("zh-TW") or name_obj.get("zh-HK") or symbol
         except:
             sym_name  = symbol
         suggestion_raw = data.get("suggestion", "{}")
         try:
             sug     = json.loads(suggestion_raw) if isinstance(suggestion_raw, str) else suggestion_raw
-            ai_text = sug.get("en", str(suggestion_raw))
+            ai_text = sug.get("zh") or sug.get("tc") or sug.get("zh-TW") or sug.get("zh-HK") or str(suggestion_raw)
         except:
             ai_text = str(suggestion_raw)
         
