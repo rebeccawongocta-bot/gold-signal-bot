@@ -17,7 +17,8 @@ from flask import Flask, request
 # ─── 配置区 ────────────────────────────────────────────────────────────────
 
 BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "8702664592:AAE7QP3z9Tc9lHegOhOnXuWWpGDWGZKlY7I")
-SIGNAL_CID = os.environ.get("SIGNAL_CID", "-1003899183014")
+SIGNAL_CID = os.environ.get("SIGNAL_CID", "-1003899183014")  # 英文频道
+CHINESE_CID = os.environ.get("CHINESE_CID", "-1004433114637")  # 中文频道
 
 OCTOPUS_API     = "https://app.octopus-vision.com/prod-api/appHuginn/app-api/ai/quote-predict/latest"
 OCTOPUS_HEADERS = {"Client-Type": "ANDROID", "Platform": "OCTOPUS"}
@@ -159,7 +160,7 @@ def build_signal_message(symbol="XAUUSD"):
             f"🛡 Support:  {support_p}",
             f"🚧 Resistance: {resist_p}",
             "",
-            f"📊 AI: {ai_text}",
+            f"📊 AI suggestions: {ai_text}",
             "",
             "⚠️ Investing involves risk.",
             "🤝 BD: @rebecca_octopus",
