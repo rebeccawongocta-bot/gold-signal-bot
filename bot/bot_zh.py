@@ -170,14 +170,7 @@ def send_signal_to_channel():
         "chat_id": CHINESE_CID,
         "text": msg,
         "parse_mode": "HTML",
-        "reply_markup": {
-            "inline_keyboard": [
-                [
-                    {"text": "📝 注册", "url": "https://app.octopus-vision.com/html/html/register.html?code=C0144"},
-                    {"text": "📱 下载APP", "url": "https://www.octopus-vision.com/#download"}
-                ]
-            ]
-        }
+        # 信号消息不带按钮，纯文字推送
     }
 
     result = tg_api("sendMessage", payload)
