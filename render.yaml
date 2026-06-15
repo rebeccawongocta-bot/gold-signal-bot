@@ -13,3 +13,18 @@ services:
         sync: false
       - key: RENDER_URL
         sync: false
+
+  - type: web
+    name: octatrade-tg-bot-zh
+    env: python
+    buildCommand: "pip install -r bot/requirements.txt"
+    startCommand: "python bot/bot_zh.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: CHINESE_CID
+        sync: false
+      - key: RENDER_URL
+        sync: false
