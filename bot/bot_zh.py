@@ -175,14 +175,11 @@ def send_signal_to_channel():
                 [
                     {"text": "📝 注册", "url": "https://app.octopus-vision.com/html/html/register.html?code=C0144"},
                     {"text": "📱 下载APP", "url": "https://www.octopus-vision.com/#download"}
-                ],
-                [
-                    {"text": "🔑 复制邀请码", "copy_text": {"text": "SG4879"}}
                 ]
             ]
         }
     }
-    
+
     result = tg_api("sendMessage", payload)
     if result and result.get("ok"):
         log.info("  [信号] 推送成功")
