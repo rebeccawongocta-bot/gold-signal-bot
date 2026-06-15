@@ -133,9 +133,9 @@ def build_signal_message(symbol="XAUUSD"):
         
         # 方向判断
         if direction == "UP":
-            emoji, arrow, dir_text = "🔵", "⬆️", "做多"
+            emoji, arrow, dir_text = "🔵", "⬆️", "\u505a\u591a"
         elif direction == "DOWN":
-            emoji, arrow, dir_text = "🔴", "⬇️", "做空"
+            emoji, arrow, dir_text = "🔴", "⬇️", "\u505a\u7a7a"
         else:
             emoji, arrow, dir_text = "⚪", "➖", "持有"
         
