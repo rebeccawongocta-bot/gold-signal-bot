@@ -263,10 +263,10 @@ def start_market_reminder():
         (6, 50, "惠灵顿 + 悉尼", "🇳🇿🇦🇺", "Australia/Sydney", [0]),
         # 亚洲主力时段
         (8, 50, "东京", "🇯🇵", "Asia/Tokyo", None),
-        # 欧洲盘
-        (14, 50, "伦敦", "🇬🇧", "Europe/London", None),
-        # 美盘
-        (20, 20, "纽约", "🇺🇸", "US/Eastern", None),
+        # 欧洲盘（伦敦 08:00 开盘，提前 10 分钟提醒）
+        (7, 50, "伦敦", "🇬🇧", "Europe/London", None),
+        # 美盘（纽约 09:30 开盘，提前 10 分钟提醒）
+        (9, 20, "纽约", "🇺🇸", "US/Eastern", None),
     ]
     
     while True:
