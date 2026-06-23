@@ -405,7 +405,7 @@ def start_daily_welcome():
                     keyboard = {
                         "inline_keyboard": [
                             [
-                                {"text": "📝 Register", "url": "https://app.octopus-vision.com/html/html/register.html?code=C0144"},
+                                {"text": "📝 Register", "url": "https://app.octopus-vision.com/html/register.html?code=C0144"},
                                 {"text": "📱 Download APP", "url": "https://www.octopus-vision.com/#download"},
                             ],
                             [

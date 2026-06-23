@@ -375,7 +375,7 @@ def start_daily_welcome():
                         "reply_markup": {
                             "inline_keyboard": [
                                 [
-                                    {"text": "📝 注册", "url": "https://app.octopus-vision.com/html/html/register.html?code=C0144"},
+                                    {"text": "📝 注册", "url": "https://app.octopus-vision.com/html/register.html?code=C0144"},
                                     {"text": "📱 下载APP", "url": "https://www.octopus-vision.com/#download"}
                                 ],
                                 [
