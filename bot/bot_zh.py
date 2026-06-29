@@ -521,22 +521,24 @@ def start_signal_loop():
 # ─── 自我保活 ──────────────────────────────────────────────────────────────
 
 def keep_alive_self():
-    """后台线程 — 每5分钟 ping 自己的 HTTP 端口，防止 Render 免费版休眠"""
+    """后台线程 — 每5分钟 ping 自己的外部 Render URL，防止免费版休眠"""
     log.info("  [保活] 自我保活线程启动")
-    
-    # 等待 HTTP 服务器启动
     time.sleep(10)
-
-    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    
+    # Render 免费版需要外部 HTTP 请求才能保持唤醒
+    # 用 RENDER_URL（手动设置）或构造默认 URL
+    render_url = os.environ.get("RENDER_URL", "").strip()
     if not render_url:
-        # 尝试用 RENDER_URL 或从 PORT 构造
-        port = os.environ.get("PORT", "10000")
-        render_url = f"http://localhost:{port}"
-
+        #  fallback：尝试从服务名构造（Render 服务名.onrender.com）
+        service_name = os.environ.get("RENDER_SERVICE_NAME", "octatrade-tg-bot-zh")
+        render_url = f"https://{service_name}.onrender.com"
+    
+    log.info(f"  [保活] 目标 URL: {render_url}")
+    headers = {"User-Agent": "Render-KeepAlive/1.0"}
     while True:
         try:
             time.sleep(300)  # 5分钟
-            r = requests.get(render_url, timeout=10)
+            r = requests.get(render_url, headers=headers, timeout=10)
             log.info(f"  [保活] ping {render_url} -> {r.status_code}")
         except Exception as e:
             log.warning(f"  [保活] ping失败: {e}")
