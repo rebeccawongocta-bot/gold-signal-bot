@@ -21,7 +21,7 @@ BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "8702664592:AAE7QP3z9Tc9lHegOh
 CHINESE_CID = os.environ.get("CHINESE_CID", "-1004433114637")  # 中文频道
 
 OCTOPUS_API     = "https://app.octopus-vision.com/prod-api/appHuginn/app-api/ai/quote-predict/latest"
-OCTOPUS_HEADERS = {"Client-Type": "ANDROID", "Platform": "OCTOPUS"}
+OCTOPUS_HEADERS = {"Client-Type": "ANDROID", "Platform": "OCTOPUS", "Accept-Language": "zh-TW"}
 
 # ─── 日志 ──────────────────────────────────────────────────────────────────
 
@@ -130,34 +130,12 @@ def build_signal_message(symbol="XAUUSD"):
         target_p    = data.get("targetPrice", "N/A")
         change_r    = data.get("changeRate", "")
         period      = data.get("updatePeriod", "1H")
-        name_raw    = data.get("name", "{}")
-        # 品种名：优先用中文映射表（API 目前只返回英文字符串）
-        sym_name = SYMBOL_NAMES_ZH.get(symbol, symbol)
-        # 如果 API 返回 JSON 格式的 name，尝试取 zh
-        try:
-            if isinstance(name_raw, str) and name_raw.startswith("{"):
-                name_obj = json.loads(name_raw)
-                api_zh = name_obj.get("zh") or name_obj.get("tc") or name_obj.get("zh-TW")
-                if api_zh:
-                    sym_name = api_zh
-        except:
-            pass
-        # AI 分析：API 可能返回 JSON 或纯文本
-        ai_text = ""
-        suggestion_raw = data.get("suggestion", "{}")
-        try:
-            if isinstance(suggestion_raw, str):
-                sug = json.loads(suggestion_raw)
-                if isinstance(sug, dict):
-                    ai_text = sug.get("zh") or sug.get("tc") or sug.get("zh-TW") or sug.get("en", str(suggestion_raw))
-                else:
-                    ai_text = str(sug)
-            elif isinstance(suggestion_raw, dict):
-                ai_text = suggestion_raw.get("zh") or suggestion_raw.get("tc") or suggestion_raw.get("en", str(suggestion_raw))
-            else:
-                ai_text = str(suggestion_raw)
-        except:
-            ai_text = str(suggestion_raw)
+        # 品种名：API 对 zh-TW 请求直接返回中文字符串（如 "黃金"）
+        name_raw = data.get("name", symbol)
+        sym_name = str(name_raw).strip() or SYMBOL_NAMES_ZH.get(symbol, symbol)
+        # AI 分析：API 直接返回中文（如 "背靠$4034.77支撑轻仓做多..."）
+        suggestion_raw = data.get("suggestion", "")
+        ai_text = str(suggestion_raw).strip()
         
         # 方向判断
         if direction == "UP":
