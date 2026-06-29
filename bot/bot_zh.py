@@ -103,6 +103,18 @@ def seconds_to_next_utc(target_hour_local, target_minute_local, tz_str="Asia/Sha
 
 # ─── 信号推送 ─────────────────────────────────────────────────────────────
 
+# 品种名中文映射（API 目前只返回英文名）
+SYMBOL_NAMES_ZH = {
+    "XAUUSD": "黃金",
+    "BTCUSDT": "比特幣",
+    "XAGUSD": "白銀",
+    "USOUSD": "原油",
+    "ETHUSDT": "以太坊",
+    "EURUSD": "歐元美元",
+    "GBPUSD": "英鎊美元",
+    "USDJPY": "美元日圓",
+}
+
 def build_signal_message(symbol="XAUUSD"):
     data = fetch_octopus(symbol)
     if not data:
@@ -119,15 +131,31 @@ def build_signal_message(symbol="XAUUSD"):
         change_r    = data.get("changeRate", "")
         period      = data.get("updatePeriod", "1H")
         name_raw    = data.get("name", "{}")
+        # 品种名：优先用中文映射表（API 目前只返回英文字符串）
+        sym_name = SYMBOL_NAMES_ZH.get(symbol, symbol)
+        # 如果 API 返回 JSON 格式的 name，尝试取 zh
         try:
-            name_obj = json.loads(name_raw)
-            sym_name  = name_obj.get("zh") or name_obj.get("tc") or name_obj.get("zh-TW") or name_obj.get("zh-HK") or symbol
+            if isinstance(name_raw, str) and name_raw.startswith("{"):
+                name_obj = json.loads(name_raw)
+                api_zh = name_obj.get("zh") or name_obj.get("tc") or name_obj.get("zh-TW")
+                if api_zh:
+                    sym_name = api_zh
         except:
-            sym_name  = symbol
+            pass
+        # AI 分析：API 可能返回 JSON 或纯文本
+        ai_text = ""
         suggestion_raw = data.get("suggestion", "{}")
         try:
-            sug     = json.loads(suggestion_raw) if isinstance(suggestion_raw, str) else suggestion_raw
-            ai_text = sug.get("zh") or sug.get("tc") or sug.get("zh-TW") or sug.get("zh-HK") or str(suggestion_raw)
+            if isinstance(suggestion_raw, str):
+                sug = json.loads(suggestion_raw)
+                if isinstance(sug, dict):
+                    ai_text = sug.get("zh") or sug.get("tc") or sug.get("zh-TW") or sug.get("en", str(suggestion_raw))
+                else:
+                    ai_text = str(sug)
+            elif isinstance(suggestion_raw, dict):
+                ai_text = suggestion_raw.get("zh") or suggestion_raw.get("tc") or suggestion_raw.get("en", str(suggestion_raw))
+            else:
+                ai_text = str(suggestion_raw)
         except:
             ai_text = str(suggestion_raw)
         
