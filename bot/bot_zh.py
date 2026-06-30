@@ -18,7 +18,23 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ─── 配置区 ──────────────────────────────────────────────────────────────
 
 BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "8702664592:AAE7QP3z9Tc9lHegOhOnXuWWpGDWGZKlY7I")
-CHINESE_CID = os.environ.get("CHINESE_CID", "-1004433114637")  # 中文频道
+CHINESE_CID = os.environ.get("CHINESE_CID", "-1004433114637")  # 中文频道（主）
+# 同步推送的额外频道 ID 列表（环境变量 EXTRA_CIDS 用逗号分隔）
+EXTRA_CIDS  = os.environ.get("EXTRA_CIDS", "").strip()
+TARGET_CIDS = [CHINESE_CID] + [x.strip() for x in EXTRA_CIDS.split(",") if x.strip()]
+
+def send_to_all(payload_base):
+    """向所有目标频道发送同一条消息，返回成功数量"""
+    ok = 0
+    for cid in TARGET_CIDS:
+        payload = dict(payload_base)
+        payload["chat_id"] = cid
+        result = tg_api("sendMessage", payload)
+        if result and result.get("ok"):
+            ok += 1
+        else:
+            log.warning(f"  [发送] chat_id={cid} 失败: {result}")
+    return ok
 
 OCTOPUS_API     = "https://app.octopus-vision.com/prod-api/appHuginn/app-api/ai/quote-predict/latest"
 OCTOPUS_HEADERS = {"Client-Type": "ANDROID", "Platform": "OCTOPUS", "Accept-Language": "zh-TW"}
@@ -173,17 +189,15 @@ def send_signal_to_channel():
         return
     
     payload = {
-        "chat_id": CHINESE_CID,
         "text": msg,
         "parse_mode": "HTML",
-        # 信号消息不带按钮，纯文字推送
     }
 
-    result = tg_api("sendMessage", payload)
-    if result and result.get("ok"):
-        log.info("  [信号] 推送成功")
+    ok = send_to_all(payload)
+    if ok > 0:
+        log.info(f"  [信号] 推送成功（{ok}/{len(TARGET_CIDS)} 个频道）")
     else:
-        log.warning(f"  [信号] 推送失败: {result}")
+        log.warning(f"  [信号] 全部推送失败")
 
 
 # ─── 市场提醒 ─────────────────────────────────────────────────────────────
@@ -225,14 +239,13 @@ def send_market_reminder(exchange_name, emoji, tz_str, tip_key):
     )
     
     payload = {
-        "chat_id": CHINESE_CID,
         "text": msg,
         "parse_mode": "HTML"
     }
     
-    result = tg_api("sendMessage", payload)
-    if result and result.get("ok"):
-        log.info(f"  [提醒] {exchange_name} 开盘提醒发送成功")
+    ok = send_to_all(payload)
+    if ok > 0:
+        log.info(f"  [提醒] {exchange_name} 开盘提醒发送成功（{ok}/{len(TARGET_CIDS)} 个频道）")
     else:
         log.warning(f"  [提醒] {exchange_name} 开盘提醒发送失败")
 
@@ -246,14 +259,13 @@ def send_market_close_reminder():
     )
     
     payload = {
-        "chat_id": CHINESE_CID,
         "text": msg,
         "parse_mode": "HTML"
     }
     
-    result = tg_api("sendMessage", payload)
-    if result and result.get("ok"):
-        log.info("  [提醒] 休市提醒发送成功")
+    ok = send_to_all(payload)
+    if ok > 0:
+        log.info(f"  [提醒] 休市提醒发送成功（{ok}/{len(TARGET_CIDS)} 个频道）")
     else:
         log.warning(f"  [提醒] 休市提醒发送失败")
 
@@ -375,7 +387,6 @@ def start_daily_welcome():
                     )
                     
                     payload = {
-                        "chat_id": CHINESE_CID,
                         "text": msg,
                         "parse_mode": "HTML",
                         "reply_markup": {
@@ -394,12 +405,12 @@ def start_daily_welcome():
                         }
                     }
                     
-                    result = tg_api("sendMessage", payload)
-                    if result and result.get("ok"):
-                        log.info(f"  [欢迎] 消息发送成功 ({target_time.strftime('%H:%M')})")
+                    ok = send_to_all(payload)
+                    if ok > 0:
+                        log.info(f"  [欢迎] 消息发送成功 ({target_time.strftime('%H:%M')})（{ok}/{len(TARGET_CIDS)} 个频道）")
                         targets_today[i] = (target_time, True)
                     else:
-                        log.warning(f"  [欢迎] 消息发送失败: {result}")
+                        log.warning(f"  [欢迎] 消息发送失败")
             
             # 每30秒检查一次
             time.sleep(30)
