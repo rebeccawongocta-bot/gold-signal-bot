@@ -338,6 +338,9 @@ def start_weekly_reminders():
                         log.info("周六休市提醒已发送")
                         sent_close = close_key
 
+                        # 10 分钟后自动暂停 Render 服务（省时长）
+                        threading.Thread(target=suspend_self_delayed, daemon=True).start()
+
                 time.sleep(30)
             except Exception as e:
                 log.warning(f"周提醒异常: {e}")
@@ -453,6 +456,34 @@ def start_daily_welcome():
 
 
 # ─── 线程 4：自我保活（ping 外部 URL 防止 Render 休眠）──────────────────
+
+
+def suspend_self_delayed():
+    """休市提醒后延迟 10 分钟暂停 Render 服务（省周末时长）"""
+    log.info("将在 10 分钟后自动暂停 Render 服务...")
+    time.sleep(600)  # 10 分钟
+
+    api_key = os.environ.get("RENDER_API_KEY", "")
+    service_id = os.environ.get("RENDER_SERVICE_ID", "")
+    if not api_key or not service_id:
+        log.warning("缺少 RENDER_API_KEY 或 RENDER_SERVICE_ID，无法自动暂停")
+        return
+
+    try:
+        r = requests.post(
+            f"https://api.render.com/v1/services/{service_id}/suspend",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json",
+            },
+            timeout=15,
+        )
+        log.info(f"自动暂停 Render: HTTP {r.status_code}")
+        if r.status_code == 200:
+            log.info("✅ Render 服务已暂停，等待周一 GitHub Actions 唤醒")
+    except Exception as e:
+        log.warning(f"自动暂停失败: {e}")
+
 
 def keep_alive_self():
     log.info("保活线程启动")
