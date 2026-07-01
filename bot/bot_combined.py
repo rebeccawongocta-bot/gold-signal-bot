@@ -390,7 +390,7 @@ def start_daily_welcome():
                         msg_en = (
                             "🤖 Welcome to Octopus AI Trader\n\n"
                             "📲 Download our APP for more AI predictions\n"
-                            "📲 Silver · Crude Oil · ETH · EUR & more\n\n"
+                            "📲 Forex · Crypto · Silver · Indices · Crude Oil · Taiwan Stocks · Korea Stocks & more\n\n"
                             "🎁 Invite code 【SG4879】 — Get 38 Credits!"
                         )
                         keyboard_en = {
