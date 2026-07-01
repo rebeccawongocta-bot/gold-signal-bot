@@ -1,16 +1,7 @@
-name: XAUUSD Signal - Telegram Push (备用)
+name: XAUUSD Signal - Manual Backup Push
 
 on:
-  workflow_dispatch:   # 仅手动触发（Render 为主，GitHub Actions 为备用）
-    inputs:
-      symbol:
-        description: '交易品种 (XAUUSD / BTCUSDT)'
-        required: false
-        default: 'XAUUSD'
-        type: choice
-        options:
-          - XAUUSD
-          - BTCUSDT
+  workflow_dispatch:   # 仅手动触发（Render 为主，此为备用）
 
 jobs:
   push:
@@ -18,19 +9,20 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Checkout 代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 设置 Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 安装依赖
+      - name: Install deps
         run: pip install requests pytz
 
-      - name: 推送信号
+      - name: Push XAUUSD signal
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          SIGNAL_CID:        ${{ secrets.SIGNAL_CID }}
-        run: python ai_signals.py ${{ github.event.inputs.symbol || 'XAUUSD' }}
+          SIGNAL_CID: ${{ secrets.SIGNAL_CID }}
+          CHINESE_CID: ${{ secrets.CHINESE_CID }}
+        run: python ai_signals.py XAUUSD
