@@ -23,7 +23,7 @@ CHINESE_CID = os.environ.get("CHINESE_CID", "-1004433114637")  # 中文频道
 OCTOPUS_API     = "https://app.octopus-vision.com/prod-api/appHuginn/app-api/ai/quote-predict/latest"
 OCTOPUS_HEADERS = {"Client-Type": "ANDROID", "Platform": "OCTOPUS"}
 
-RENDER_URL = os.environ.get("RENDER_URL", "https://octatrade-tg-bot.onrender.com")
+RENDER_URL = os.environ.get("RENDER_URL", "https://gold-signal-bot-wrk9.onrender.com")
 
 TZ = pytz.timezone("Asia/Shanghai")  # CST (UTC+8)
 
