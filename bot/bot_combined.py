@@ -361,16 +361,18 @@ def start_daily_welcome():
         targets_today  = []
 
         def pick_random_targets():
-            now = datetime.now(TZ)
-            # 第一档：14:00-18:00
-            base1 = now.replace(hour=14, minute=0, second=0, microsecond=0)
-            rand1 = random.randint(0, 4 * 60 - 1)
-            t1 = base1 + timedelta(minutes=rand1)
-            # 第二档：19:00-23:00
-            base2 = now.replace(hour=19, minute=0, second=0, microsecond=0)
-            rand2 = random.randint(0, 4 * 60 - 1)
-            t2 = base2 + timedelta(minutes=rand2)
-            return [(t1, False), (t2, False)]
+            dt_now = datetime.now(TZ)
+            # 欢迎消息每日 3 次：午间静默 + 活跃时段 2 档
+            # 1) 午间静默 11:30-13:00 随机一次
+            base_lunch = dt_now.replace(hour=11, minute=30, second=0, microsecond=0)
+            t_lunch = base_lunch + timedelta(minutes=random.randint(0, 90 - 1))
+            # 2) 活跃时段 16:00-18:00 随机一次
+            base_eve = dt_now.replace(hour=16, minute=0, second=0, microsecond=0)
+            t_eve = base_eve + timedelta(minutes=random.randint(0, 120 - 1))
+            # 3) 活跃时段 20:00-23:00 随机一次
+            base_night = dt_now.replace(hour=20, minute=0, second=0, microsecond=0)
+            t_night = base_night + timedelta(minutes=random.randint(0, 180 - 1))
+            return [(t_lunch, False), (t_eve, False), (t_night, False)]
 
         while True:
             try:
@@ -407,7 +409,7 @@ def start_daily_welcome():
                                 ],
                             ]
                         }
-                        tg_api("sendMessage", {
+                        r_en = tg_api("sendMessage", {
                             "chat_id": EN_CID,
                             "text": msg_en,
                             "parse_mode": "HTML",
@@ -435,15 +437,18 @@ def start_daily_welcome():
                                 ],
                             ]
                         }
-                        tg_api("sendMessage", {
+                        r_zh = tg_api("sendMessage", {
                             "chat_id": ZH_CID,
                             "text": msg_zh,
                             "parse_mode": "HTML",
                             "reply_markup": keyboard_zh,
                         })
 
-                        log.info(f"欢迎消息已发送 ({now.strftime('%H:%M')} CST)")
-                        targets_today[i] = (target_time, True)
+                        if r_en and r_en.get("ok") and r_zh and r_zh.get("ok"):
+                            log.info(f"欢迎消息已发送 ({now.strftime('%H:%M')} CST)")
+                            targets_today[i] = (target_time, True)
+                        else:
+                            log.warning(f"欢迎消息发送未完成，稍后重试 EN={bool(r_en and r_en.get('ok'))} ZH={bool(r_zh and r_zh.get('ok'))}")
 
                 time.sleep(30)
             except Exception as e:
