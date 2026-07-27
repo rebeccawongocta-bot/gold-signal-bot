@@ -83,6 +83,32 @@ def fetch_octopus(symbol="XAUUSD", lang="en"):
 
 # ─── 信号推送 ─────────────────────────────────────────────────────────────
 
+def _extract_ai_text(suggestion_raw, lang):
+    """从 API 的 suggestion 字段中按 lang 取出对应语言文本。
+
+    API 始终返回 JSON 字符串 '{"en":"...","zh":"..."}'（不受 Accept-Language 影响），
+    极端情况下也可能直接返回 dict 或其它类型。三种形态都要兜底。
+    """
+    if suggestion_raw is None:
+        return ""
+    sug = suggestion_raw
+    if isinstance(sug, str):
+        s = sug.strip()
+        if s.startswith("{"):
+            try:
+                sug = json.loads(s)
+            except Exception:
+                return s  # 不是合法 JSON，原样返回
+        else:
+            return s  # 纯文本
+    if isinstance(sug, dict):
+        txt = sug.get(lang) or sug.get("en") or ""
+        if txt:
+            return str(txt).strip()
+    # 兜底：转字符串（避免把 dict literal 拼进消息）
+    return str(suggestion_raw).strip() if not isinstance(suggestion_raw, (dict, list)) else ""
+
+
 def build_signal_en(symbol="XAUUSD"):
     """构造英文信号消息"""
     data = fetch_octopus(symbol, lang="en")
@@ -106,12 +132,7 @@ def build_signal_en(symbol="XAUUSD"):
             sym_name = str(name_raw)
 
         # AI 分析
-        suggestion_raw = data.get("suggestion", "")
-        try:
-            sug = json.loads(suggestion_raw) if isinstance(suggestion_raw, str) and suggestion_raw.startswith("{") else {}
-            ai_text = sug.get("en", str(suggestion_raw))
-        except:
-            ai_text = str(suggestion_raw)
+        ai_text = _extract_ai_text(data.get("suggestion", ""), "en")
 
         # 方向
         if direction == "UP":
@@ -158,9 +179,8 @@ def build_signal_zh(symbol="XAUUSD"):
         name_raw = data.get("name", symbol)
         sym_name = str(name_raw).strip() or symbol
 
-        # AI 分析（API 对 zh-TW 请求直接返回中文）
-        suggestion_raw = data.get("suggestion", "")
-        ai_text = str(suggestion_raw).strip()
+        # AI 分析
+        ai_text = _extract_ai_text(data.get("suggestion", ""), "zh")
 
         # 方向
         if direction == "UP":
